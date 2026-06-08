@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CuraFlow Clinical Health System</title>
+    <script>
+      // Shadow WebSocket constructor and suppress unhandled socket connection rejections gracefully
+      (function() {
+        const OriginalWebSocket = window.WebSocket;
+        if (OriginalWebSocket) {
+          window.WebSocket = function(url, protocols) {
+            console.log("[CuraFlow Socket Shim] Initiating safe connection wrapper for:", url);
+            const isViteHmr = typeof url === 'string' && (url.includes('/vite') || url.includes('ws:'));
+            
+            let ws;
+            try {
+              ws = new OriginalWebSocket(url, protocols);
+            } catch (err) {
+              console.warn("[CuraFlow Socket Shim] Fallback construction triggered:", err);
+              // Safe dummy WS model to reject silently
+              const dummy = {
+                readyState: 3, // Closed
+                url: url,
+                onclose: null,
+                onerror: null,
+                onmessage: null,
+                onopen: null,
+                binaryType: 'blob',
+                bufferedAmount: 0,
+                extensions: '',
+                protocol: '',
+                addEventListener: function() {},
+                removeEventListener: function() {},
+                send: function() {},
+                close: function() {}
+              };
+              return dummy;
+            }
+
+            if (isViteHmr && ws instanceof OriginalWebSocket) {
+              // Intercept error events and mute bubble propagation
+              ws.addEventListener('error', function(e) {
+                e.stopImmediatePropagation();
+                e.stopPropagation();
+                console.log("[CuraFlow Muted Socket] Suppressed Vite connection drop event.");
+              }, { capture: true });
+            }
+            return ws;
+          };
+          window.WebSocket.prototype = OriginalWebSocket.prototype;
+          // Retain constructor key compatibility
+          window.WebSocket.constructor = OriginalWebSocket;
+        }
+
+        // Catch unhandled developer console rejections (Vite WebSocket errors)
+        window.addEventListener('unhandledrejection', function(event) {
+          const msg = event.reason && (event.reason.message || event.reason.toString() || '');
+          if (msg && (
+            msg.includes('WebSocket') || 
+            msg.includes('websocket') || 
+            msg.includes('Vite') || 
+            msg.includes('vite')
+          )) {
+            console.log("[CuraFlow Silent Handler] Suppressed unhandled websocket rejection:", msg);
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }, true);
+
+        // Catch general window errors regarding websockets
+        window.addEventListener('error', function(event) {
+          const msg = event.message || '';
+          if (msg && (msg.includes('WebSocket') || msg.includes('websocket') || msg.includes('Vite'))) {
+            console.log("[CuraFlow Silent Handler] Suppressed global websocket exception:", msg);
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }, true);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
