@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   HealthLog, Message, Conversation, AIChatMessage, CMSArticle, AppUser, FAQ, Announcement,
-  ProviderInfo, AhomkaEntry, CommunityMessage, AppointmentBooking
+  ProviderInfo, AhomkaEntry, CommunityMessage, AppointmentBooking, SupportForumBoard
 } from '../types';
 import { 
   Activity, MessageSquare, Brain, BookOpen, Bell, User, Settings, Plus, Search, Trash2, 
@@ -18,6 +18,7 @@ import {
 import { 
   ResponsiveContainer, AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip 
 } from 'recharts';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface PatientLayoutProps {
   session: AppUser;
@@ -28,6 +29,7 @@ interface PatientLayoutProps {
   faqs: FAQ[];
   announcements: Announcement[];
   searchQuery: string;
+  forumBoards: SupportForumBoard[];
   onAddLog: (metric: any, value: string, notes: string) => void;
   onDeleteLog: (id: string) => void;
   onSendMessage: (convId: string, text: string, attachment?: any) => void;
@@ -61,7 +63,7 @@ interface PatientLayoutProps {
 }
 
 export default function PatientLayout({
-  session, logs, conversations, aiChat, articles, faqs, announcements, searchQuery,
+  session, logs, conversations, aiChat, articles, faqs, announcements, searchQuery, forumBoards,
   onAddLog, onDeleteLog, onSendMessage, onSendAIChat, isAiTyping, isDoctorTyping,
   onUpdateProfile, onTriggerToast,
   providers, ahomkaEntries, onAddAhomkaEntry, communityMessages, onSendCommunityMessage, bookings, onAddBooking, onCancelBooking,
@@ -69,6 +71,18 @@ export default function PatientLayout({
 }: PatientLayoutProps) {
   
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (isMobileMenuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isMobileMenuOpen]);
   
   // Confirmation state for deleting health logs
   const [logIdToDelete, setLogIdToDelete] = useState<string | null>(null);
@@ -141,11 +155,11 @@ export default function PatientLayout({
   const [pulse3, setPulse3] = useState<string>('70');
 
   // Interactive countdown and slide indexes
-  const [restSeconds, setRestSeconds] = useState<number>(60);
+  const [restSeconds, setRestSeconds] = useState<number>(45);
   const [showTimesUpModal, setShowTimesUpModal] = useState<boolean>(false);
   const [showVitalsSuccessModal, setShowVitalsSuccessModal] = useState<boolean>(false);
   const [rotatingSlideIndex, setRotatingSlideIndex] = useState<number>(0);
-  const [vitalsChartView, setVitalsChartView] = useState<'systolic' | 'diastolic'>('systolic');
+  const [vitalsChartView, setVitalsChartView] = useState<'systolic' | 'diastolic' | 'pulse'>('systolic');
   const [defaultTooltipCoord, setDefaultTooltipCoord] = useState<{ x: number, y: number } | null>(null);
   const [isHoveringChart, setIsHoveringChart] = useState<boolean>(false);
   const [isVitalsHistoryOpen, setIsVitalsHistoryOpen] = useState<boolean>(false);
@@ -315,7 +329,7 @@ export default function PatientLayout({
         setRotatingSlideIndex(prev => (prev + 1) % 4);
       }, 4000);
     } else {
-      setRestSeconds(60);
+      setRestSeconds(45);
     }
 
     return () => {
@@ -628,7 +642,7 @@ export default function PatientLayout({
       console.warn('summarizer prompt fallback triggered:', err.message);
       // Clean diagnostic parameters offline matching structure
       setTimeout(() => {
-        let fakeResult = "📊 **GAP Clinical AI Diagnostic Summary (Sandbox Backup Mode)**\n\n";
+        let fakeResult = "📊 **CFL Health AI Diagnostic Summary (Sandbox Backup Mode)**\n\n";
         
         const lowerText = summarizerText.toLowerCase();
         if (lowerText.includes('pressure') || lowerText.includes('bp') || lowerText.includes('systolic')) {
@@ -650,7 +664,7 @@ export default function PatientLayout({
           fakeResult += "- **Action Plan**: Shift dietary focus towards high soluble fats (omega-3 oils, local seeds) and decrease hydrogenated lipids.\n\n";
         }
         
-        if (fakeResult === "📊 **GAP Clinical AI Diagnostic Summary (Sandbox Backup Mode)**\n\n") {
+        if (fakeResult === "📊 **CFL Health AI Diagnostic Summary (Sandbox Backup Mode)**\n\n") {
           fakeResult += "### 📋 General Diagnostic Telemetry\n";
           fakeResult += "- **Observations**: Logged report data evaluated.\n";
           fakeResult += "- **Baseline Analysis**: Primary indices reflect stable clinical margins, but some metrics invite adjustments.\n";
@@ -828,10 +842,10 @@ export default function PatientLayout({
     }
 
     return {
-      avgHR: avgHR || 72,
-      avgGlucose: avgGlucose || 104,
-      avgSystolic: avgSystolic || 122,
-      avgDiastolic: avgDiastolic || 81,
+      avgHR: hr30.length > 0 ? avgHR : 0,
+      avgGlucose: glucose30.length > 0 ? avgGlucose : 0,
+      avgSystolic: bp30.length > 0 ? avgSystolic : 0,
+      avgDiastolic: bp30.length > 0 ? avgDiastolic : 0,
       hrCount: hr30.length,
       glucoseCount: glucose30.length,
       bpCount: bp30.length
@@ -845,18 +859,164 @@ export default function PatientLayout({
   const activeHR = logs.find(l => l.metric === 'Heart Rate')?.value || '--';
   const activeWeight = logs.find(l => l.metric === 'Weight')?.value || '--';
 
+  const uniqueDatesLogged = new Set([
+    ...logs.map(l => {
+      try { return l.timestamp.split(',')[0].trim(); } catch { return l.timestamp; }
+    }),
+    ...ahomkaEntries.map(e => e.timestamp)
+  ]);
+  const totalDaysLogged = uniqueDatesLogged.size;
+  const complianceRate = totalDaysLogged === 0 ? 0 : Math.min(100, Math.round((totalDaysLogged / 7) * 100));
+
   const selectedConv = conversations.find(c => c.id === chatSelectedConvId) || conversations[0] || null;
 
   return (
     <div className="flex-1 flex flex-col md:flex-row h-full overflow-hidden">
       
+      {/* Mobile Top Sub-Header Navigation Bar */}
+      <div className="md:hidden flex items-center justify-between bg-white dark:bg-slate-900 px-4 py-3 border-b border-slate-200 dark:border-slate-800 shrink-0 select-none">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest font-mono">Panel</span>
+          <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
+            {activeTab === 'dashboard' && 'Wellness Dashboard'}
+            {activeTab === 'messages' && 'Secure Messaging'}
+            {activeTab === 'ahomka' && 'Health Vitals'}
+            {activeTab === 'community' && 'Community Chat'}
+            {activeTab === 'education' && 'Education Library'}
+            {activeTab === 'ai' && 'CFL Health AI'}
+            {activeTab === 'profile' && 'Patient Profile'}
+          </span>
+        </div>
+        <button
+          onClick={() => setIsMobileMenuOpen(true)}
+          className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+          title="Open Navigation"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6h16M4 12h16m-7 6h7" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Mobile Menu Slide-out Drawer */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <div className="fixed inset-0 z-[11000] md:hidden">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.5 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="absolute inset-0 bg-slate-950 backdrop-blur-xs cursor-pointer"
+            />
+            
+            {/* Drawer Panel */}
+            <motion.div
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="absolute top-0 bottom-0 left-0 w-72 max-w-[85vw] bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 p-5 flex flex-col justify-between shadow-2xl overflow-y-auto"
+            >
+              <div className="space-y-6">
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="px-2 py-0.5 bg-indigo-600 rounded-lg flex items-center justify-center text-white text-xs font-black shadow-lg">
+                      CFL
+                    </div>
+                    <span className="font-sans font-bold text-slate-900 dark:text-white">Patient Hub</span>
+                  </div>
+                  <button
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  <button 
+                    onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    <Activity className="w-4 h-4" />
+                    <span>Wellness Dashboard</span>
+                  </button>
+                  
+                  <button 
+                    onClick={() => { setActiveTab('messages'); setIsMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'messages' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    <span className="flex items-center justify-between w-full">
+                      <span>Secure Messaging</span>
+                      {selectedConv?.unread > 0 && (
+                        <span className="bg-rose-500 text-white w-2.5 h-2.5 rounded-full animate-ping"></span>
+                      )}
+                    </span>
+                  </button>
+
+                  <button 
+                    onClick={() => { setActiveTab('ahomka'); setIsMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'ahomka' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    <Heart className="w-4 h-4" />
+                    <span>Ahomka Ho (Health Vitals)</span>
+                  </button>
+
+                  <button 
+                    onClick={() => { setActiveTab('community'); setIsMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'community' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    <Users className="w-4 h-4" />
+                    <span>Community Chat</span>
+                  </button>
+
+                  <button 
+                    onClick={() => { setActiveTab('education'); setIsMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'education' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    <span>Education Library</span>
+                  </button>
+
+                  <button 
+                    onClick={() => { setActiveTab('ai'); setIsMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'ai' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    <Brain className="w-4 h-4" />
+                    <span className="flex items-center gap-1">
+                      <span>CFL Health AI</span>
+                      <Sparkles className="w-3 h-3 text-amber-400 fill-amber-400 animate-pulse" />
+                    </span>
+                  </button>
+
+                  <button 
+                    onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'profile' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    <User className="w-4 h-4" />
+                    <span>Update Profile Info</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-100 dark:border-slate-800 pt-4 mt-6 text-center">
+                <span className="text-[9px] text-slate-400 font-mono">CFL Core Secure Platform v2.4</span>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      
       {/* Patient Sidebar navigation rails */}
-      <aside className="w-full md:w-56 border-b md:border-b-0 md:border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-y-auto shrink-0 p-4 space-y-1.5 flex md:flex-col justify-between md:justify-start">
+      <aside className="hidden md:flex w-full md:w-56 border-b md:border-b-0 md:border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-y-auto shrink-0 p-4 space-y-1.5 md:flex-col justify-between md:justify-start">
         <div className="w-full space-y-1">
           <button 
             id="tab-pat-dashboard"
             onClick={() => setActiveTab('dashboard')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Activity className="w-4 h-4" />
             <span className="md:inline">Wellness Dashboard</span>
@@ -865,7 +1025,7 @@ export default function PatientLayout({
           <button 
             id="tab-pat-messages"
             onClick={() => setActiveTab('messages')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'messages' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'messages' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <MessageSquare className="w-4 h-4" />
             <span className="md:inline flex items-center justify-between w-full">
@@ -877,18 +1037,9 @@ export default function PatientLayout({
           </button>
 
           <button 
-            id="tab-pat-providers"
-            onClick={() => setActiveTab('providers')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'providers' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-          >
-            <Stethoscope className="w-4 h-4" />
-            <span className="md:inline">Book Provider</span>
-          </button>
-
-          <button 
             id="tab-pat-ahomka"
             onClick={() => setActiveTab('ahomka')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'ahomka' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'ahomka' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Heart className="w-4 h-4" />
             <span className="md:inline font-bold">Ahomka Ho (Health Vitals)</span>
@@ -897,7 +1048,7 @@ export default function PatientLayout({
           <button 
             id="tab-pat-community"
             onClick={() => setActiveTab('community')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'community' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'community' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Users className="w-4 h-4" />
             <span className="md:inline">Community Chat</span>
@@ -906,7 +1057,7 @@ export default function PatientLayout({
           <button 
             id="tab-pat-education"
             onClick={() => setActiveTab('education')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'education' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'education' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <BookOpen className="w-4 h-4" />
             <span className="md:inline">Education Library</span>
@@ -915,11 +1066,11 @@ export default function PatientLayout({
           <button 
             id="tab-pat-ai"
             onClick={() => setActiveTab('ai')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'ai' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'ai' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Brain className="w-4 h-4" />
             <span className="md:inline flex items-center gap-1">
-              <span>GAP Clinical AI</span>
+              <span>CFL Health AI</span>
               <Sparkles className="w-3 h-3 text-amber-400 fill-amber-400 animate-pulse" />
             </span>
           </button>
@@ -927,7 +1078,7 @@ export default function PatientLayout({
           <button 
             id="tab-pat-profile"
             onClick={() => setActiveTab('profile')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'profile' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'profile' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <User className="w-4 h-4" />
             <span className="md:inline">Update Profile Info</span>
@@ -936,7 +1087,16 @@ export default function PatientLayout({
       </aside>
 
       {/* Primary Patient tabs rendering viewport */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="flex-1 overflow-y-auto p-6">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            transition={{ duration: 0.16, ease: "easeOut" }}
+            className="space-y-6"
+          >
         
         {/* TAB 1: Patient Dashboard */}
         {activeTab === 'dashboard' && (
@@ -1017,10 +1177,18 @@ export default function PatientLayout({
                     <CheckCircle className="w-4 h-4 text-emerald-500" />
                     Adherence Compliance
                   </h4>
-                  <p className="text-[11px] text-slate-400 mt-1 max-w-sm">92% weekly compliance. You checked in logs for 6 consecutive days. Stretch targets finalized.</p>
+                  <p className="text-[11px] text-slate-400 mt-1 max-w-sm">
+                    {totalDaysLogged === 0 ? (
+                      "No health logs submitted this week yet. Track your vitals or complete an Ahomka check-in to establish log compliance."
+                    ) : (
+                      `${complianceRate}% weekly compliance. You checked in logs for ${totalDaysLogged} day(s) this cycle.`
+                    )}
+                  </p>
                 </div>
                 <div className="text-right shrink-0">
-                  <span className="font-mono text-xl font-bold text-indigo-600 dark:text-indigo-400">Stable</span>
+                  <span className="font-mono text-xl font-bold text-indigo-600 dark:text-indigo-400">
+                    {totalDaysLogged === 0 ? "Pending" : totalDaysLogged >= 4 ? "Excellent" : "Stable"}
+                  </span>
                 </div>
               </div>
 
@@ -1045,15 +1213,19 @@ export default function PatientLayout({
                 
                 {/* 1. Average BP Card */}
                 <div className="p-4 bg-emerald-50/40 dark:bg-emerald-950/10 rounded-xl border border-emerald-100/60 dark:border-emerald-900/30 flex items-center gap-4">
-                  <div className="p-3 bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-450 rounded-xl shadow-2xs shrink-0 border border-slate-100 dark:border-slate-700">
+                  <div className="p-3 bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 rounded-xl shadow-2xs shrink-0 border border-slate-100 dark:border-slate-700">
                     <Heart className="w-5 h-5 fill-emerald-500 text-emerald-500" />
                   </div>
                   <div>
                     <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block font-mono">Blood Pressure Average</span>
                     <h4 className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
-                      {get30DaysSummary().avgSystolic}/{get30DaysSummary().avgDiastolic} <span className="text-xs text-slate-400 font-normal">mmHg</span>
+                       {get30DaysSummary().bpCount > 0 ? (
+                         <>{get30DaysSummary().avgSystolic}/{get30DaysSummary().avgDiastolic} <span className="text-xs text-slate-400 font-normal">mmHg</span></>
+                       ) : (
+                         <span className="text-xs text-slate-400 font-normal italic">No readings</span>
+                       )}
                     </h4>
-                    <span className="text-[9px] text-slate-450 dark:text-slate-500 font-bold block mt-0.5">Compiled from {get30DaysSummary().bpCount} records</span>
+                    <span className="text-[9px] text-slate-400 dark:text-slate-500 font-bold block mt-0.5">Compiled from {get30DaysSummary().bpCount} records</span>
                   </div>
                 </div>
 
@@ -1065,23 +1237,31 @@ export default function PatientLayout({
                   <div>
                     <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block font-mono">Serum Glucose Average</span>
                     <h4 className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
-                      {get30DaysSummary().avgGlucose} <span className="text-xs text-slate-400 font-normal">mg/dL</span>
+                      {get30DaysSummary().glucoseCount > 0 ? (
+                        <>{get30DaysSummary().avgGlucose} <span className="text-xs text-slate-400 font-normal">mg/dL</span></>
+                      ) : (
+                        <span className="text-xs text-slate-400 font-normal italic">No readings</span>
+                      )}
                     </h4>
-                    <span className="text-[9px] text-slate-450 dark:text-slate-500 font-bold block mt-0.5">Compiled from {get30DaysSummary().glucoseCount} records</span>
+                    <span className="text-[9px] text-slate-400 dark:text-slate-500 font-bold block mt-0.5">Compiled from {get30DaysSummary().glucoseCount} records</span>
                   </div>
                 </div>
 
                 {/* 3. Average Heart Rate Card */}
                 <div className="p-4 bg-indigo-50/40 dark:bg-indigo-950/10 rounded-xl border border-indigo-100/60 dark:border-indigo-900/30 flex items-center gap-4">
-                  <div className="p-3 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-405 rounded-xl shadow-2xs shrink-0 border border-slate-100 dark:border-slate-700">
-                    <Activity className="w-5 h-5 text-indigo-505" />
+                  <div className="p-3 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 rounded-xl shadow-2xs shrink-0 border border-slate-100 dark:border-slate-700">
+                    <Activity className="w-5 h-5 text-indigo-500" />
                   </div>
                   <div>
                     <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block font-mono">Heart Rate Average</span>
                     <h4 className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
-                      {get30DaysSummary().avgHR} <span className="text-xs text-slate-400 font-normal">bpm</span>
+                      {get30DaysSummary().hrCount > 0 ? (
+                        <>{get30DaysSummary().avgHR} <span className="text-xs text-slate-400 font-normal">bpm</span></>
+                      ) : (
+                        <span className="text-xs text-slate-400 font-normal italic">No readings</span>
+                      )}
                     </h4>
-                    <span className="text-[9px] text-slate-450 dark:text-slate-500 font-bold block mt-0.5">Compiled from {get30DaysSummary().hrCount} records</span>
+                    <span className="text-[9px] text-slate-400 dark:text-slate-500 font-bold block mt-0.5">Compiled from {get30DaysSummary().hrCount} records</span>
                   </div>
                 </div>
 
@@ -1103,7 +1283,7 @@ export default function PatientLayout({
                     <div 
                       key={rem.id}
                       onClick={() => toggleReminder(rem.id)}
-                      className={`p-3 rounded-lg border text-xs cursor-pointer flex items-center gap-3 transition ${rem.done ? 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 line-through border-transparent' : 'bg-white dark:bg-slate-900 border-slate-200 hover:border-indigo-400 text-slate-800 dark:text-slate-105 shadow-2xs'}`}
+                      className={`p-3 rounded-lg border text-xs cursor-pointer flex items-center gap-3 transition ${rem.done ? 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 line-through border-transparent' : 'bg-white dark:bg-slate-900 border-slate-200 hover:border-indigo-400 text-slate-800 dark:text-slate-100 shadow-2xs'}`}
                     >
                       <div className={`w-4 h-4 rounded-xs border flex items-center justify-center shrink-0 ${rem.done ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300 bg-white'}`}>
                         {rem.done && <Check className="w-3 h-3 stroke-[3]" />}
@@ -1122,12 +1302,16 @@ export default function PatientLayout({
                     Clinician Assistant Recommendation
                   </h4>
                   <p className="text-[11px] text-slate-500 leading-relaxed mt-2 italic">
-                    "{session.name.split(' ')[0]}, your health score registers optimal at 92%. We detected a slight elevation in Systolic index yesterday. We highly suggest maintaining strict sodium limit targets and consulting Dr. Jenkins if dizziness returns during morning logging."
+                    {ahomkaEntries.length === 0 && logs.length === 0 ? (
+                      `Hello ${session.name.split(' ')[0]}, no biometric diaries recorded yet. Please log your daily vitals or complete an Ahomka well-being check-in to generate tailored clinician-assistant recommendations.`
+                    ) : (
+                      `Hello ${session.name.split(' ')[0]}, based on your ${ahomkaEntries.length + logs.length} logged entry/entries, your biometrics show stable progression. Keep tracking regularly to establish a solid diagnostic baseline.`
+                    )}
                   </p>
                 </div>
 
-                <div className="pt-4 border-t border-slate-150 flex justify-between items-center mt-4">
-                  <span className="text-[10px] text-slate-440 font-bold flex items-center gap-1.5">
+                <div className="pt-4 border-t border-slate-200 flex justify-between items-center mt-4">
+                  <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1.5">
                     <Info className="w-3.5 h-3.5" />
                     Clinical references up-to-date
                   </span>
@@ -1150,7 +1334,7 @@ export default function PatientLayout({
           <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm flex h-[480px] overflow-hidden">
             
             {/* Conversations List */}
-            <div className="w-48 border-r border-slate-150 shrink-0 flex flex-col pt-4 bg-slate-50/40">
+            <div className="w-48 border-r border-slate-200 shrink-0 flex flex-col pt-4 bg-slate-50/40">
               <span className="text-[10px] font-bold text-slate-400 uppercase px-4 mb-3">Care Team Providers</span>
               <div className="flex-1 overflow-y-auto space-y-1">
                 {conversations.map(c => (
@@ -1258,7 +1442,7 @@ export default function PatientLayout({
               <div className="p-3 border-t shrink-0 bg-slate-50/10 space-y-2">
                 
                 {editingMessageId && (
-                  <div className="flex items-center justify-between bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-150 dark:border-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-[11px] py-1.5 px-3 rounded-lg">
+                  <div className="flex items-center justify-between bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-[11px] py-1.5 px-3 rounded-lg">
                     <span className="font-medium">Editing previously sent message...</span>
                     <button 
                       type="button"
@@ -1266,7 +1450,7 @@ export default function PatientLayout({
                         setEditingMessageId(null);
                         setChatInputMessage('');
                       }}
-                      className="text-indigo-500 hover:text-indigo-750 font-bold dark:text-indigo-405 dark:hover:text-indigo-300 cursor-pointer"
+                      className="text-indigo-500 hover:text-indigo-700 font-bold dark:text-indigo-400 dark:hover:text-indigo-300 cursor-pointer"
                     >
                       Cancel Edit
                     </button>
@@ -1372,7 +1556,7 @@ export default function PatientLayout({
                 <div className="flex items-center gap-3">
                   <Brain className="w-5 h-5 text-indigo-500 animate-pulse" />
                   <div>
-                    <h4 className="font-bold text-xs text-slate-200">GAP AI Clinician Companion</h4>
+                    <h4 className="font-bold text-xs text-slate-200">CFL Health AI Clinician Companion</h4>
                     <p className="text-[9px] text-indigo-400">Powered by server-side gemini-3.5-flash with local offsets</p>
                   </div>
                 </div>
@@ -1384,14 +1568,14 @@ export default function PatientLayout({
                 {aiChat.map(m => (
                   <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                     <div className={`p-3.5 rounded-xl max-w-md ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-100 border-l-2 border-indigo-500'}`}>
-                      <p className="text-[8px] opacity-60 font-sans uppercase mb-1">{m.role === 'user' ? session.name : 'GAP AI Assistant'}</p>
+                      <p className="text-[8px] opacity-60 font-sans uppercase mb-1">{m.role === 'user' ? session.name : 'CFL Health AI Assistant'}</p>
                       <p className="whitespace-pre-line leading-relaxed">{m.content}</p>
                     </div>
                   </div>
                 ))}
                 {isAiTyping && (
                   <div className="bg-slate-900 p-3 rounded-lg text-slate-400 animate-pulse text-[10px] w-56">
-                    GAP AI matching clinical benchmarks...
+                    CFL Health AI matching clinical benchmarks...
                   </div>
                 )}
               </div>
@@ -1430,7 +1614,7 @@ export default function PatientLayout({
                 <input 
                   id="pat-ai-input"
                   type="text"
-                  placeholder="Ask GAP Clinical Q&A AI (e.g. 'Explain diastolic vs systolic targets')..."
+                  placeholder="Ask CFL Health AI (e.g. 'Explain diastolic vs systolic targets')..."
                   className="flex-1 bg-slate-900/80 rounded-xl px-4 py-2 text-xs text-white border-none focus:ring-1 focus:ring-indigo-600 focus:outline-none"
                 />
                 <button 
@@ -1450,7 +1634,7 @@ export default function PatientLayout({
                 <FileText className="w-5 h-5 text-indigo-600" />
                 <div>
                   <h4 className="font-bold text-xs text-slate-800 dark:text-white">Diagnostic Lab Report Summarizer</h4>
-                  <p className="text-[10px] text-slate-400">Summarize high-risk clinical ranges with GAP AI automatically</p>
+                  <p className="text-[10px] text-slate-400">Summarize high-risk clinical ranges with CFL Health AI automatically</p>
                 </div>
               </div>
 
@@ -1479,10 +1663,10 @@ export default function PatientLayout({
                       className="hidden"
                     />
                     <Sparkles className={`w-7 h-7 text-indigo-500 mb-2 ${isDraggingFile ? 'scale-110' : 'animate-bounce animate-pulse'}`} />
-                    <p className="font-bold text-slate-850 dark:text-slate-300">
+                    <p className="font-bold text-slate-800 dark:text-slate-300">
                       {isDraggingFile ? 'Drop your report file here!' : 'Drag & drop report or click to select'}
                     </p>
-                    <p className="text-[10px] text-slate-450 dark:text-slate-500 max-w-xs mt-1">
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 max-w-xs mt-1">
                       Supports medical scans, text logs, or clinical CSV files up to 5MB.
                     </p>
                   </div>
@@ -1549,183 +1733,7 @@ export default function PatientLayout({
           </div>
         )}
 
-        {/* GAP Health GAP-1: Book Provider tab */}
-        {activeTab === 'providers' && (
-          <div className="space-y-6">
-            <div className="bg-gradient-to-r from-sky-800 to-indigo-900 text-white rounded-2xl shadow-xl p-6 relative overflow-hidden">
-              <div className="absolute right-0 bottom-0 top-0 opacity-10 w-44">
-                <Stethoscope className="w-full h-full text-white" />
-              </div>
-              <div>
-                <span className="bg-sky-500 text-[10px] font-bold px-2.5 py-1 rounded-full text-white uppercase tracking-wider">Clinicians Registry</span>
-                <h2 className="font-display text-xl font-bold mt-2 leading-tight">Virtual Care Consultations</h2>
-                <p className="text-xs text-sky-200 mt-1 max-w-lg">Connect immediately with certified medical specialists in Ghana & Gambia. Schedule video, audio, or secure messaging consults.</p>
-              </div>
-            </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Booking Form Card */}
-              <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs self-start">
-                <h4 className="font-bold text-xs text-slate-905 dark:text-white mb-4">Schedule Consultations</h4>
-                <form onSubmit={handleBookingSubmit} className="space-y-4">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Select Specialty Provider</label>
-                    <select 
-                      id="pat-book-provider"
-                      value={bookingProviderId}
-                      onChange={(e) => {
-                        setBookingProviderId(e.target.value);
-                        // Default first slot of selected provider
-                        const selected = providers.find(p => p.id === e.target.value);
-                        if (selected && selected.slots.length > 0) {
-                          setBookingDateTime(selected.slots[0]);
-                        }
-                      }}
-                      className="w-full bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 focus:border-indigo-600 focus:outline-none rounded-lg text-xs py-2 px-3 text-slate-900 dark:text-white font-semibold"
-                      required
-                    >
-                      <option value="">-- Choose Physician --</option>
-                      {providers.map(p => (
-                        <option key={p.id} value={p.id}>{p.name} ({p.specialty})</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Consultation Mode</label>
-                    <select 
-                      id="pat-book-mode"
-                      value={bookingMode}
-                      onChange={(e) => setBookingMode(e.target.value as any)}
-                      className="w-full bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 focus:border-indigo-600 focus:outline-none rounded-lg text-xs py-2 px-3 text-slate-900 dark:text-white font-semibold"
-                    >
-                      <option value="Video Call">📹 Video Telehealth Consultation</option>
-                      <option value="Audio Call">📞 Standard Audio Call</option>
-                      <option value="Secure Chat">💬 Extended Secure Messaging</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Available Slots</label>
-                    <select 
-                      id="pat-book-slot"
-                      value={bookingDateTime}
-                      onChange={(e) => setBookingDateTime(e.target.value)}
-                      className="w-full bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 focus:border-indigo-600 focus:outline-none rounded-lg text-xs py-2 px-3 font-semibold text-slate-900 dark:text-white"
-                      required
-                      disabled={!bookingProviderId}
-                    >
-                      <option value="">-- Select Time Slot --</option>
-                      {bookingProviderId && providers.find(p => p.id === bookingProviderId)?.slots.map((slot, idx) => (
-                        <option key={idx} value={slot}>{slot}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Consultation Reason Notes</label>
-                    <textarea 
-                      value={bookingReason}
-                      onChange={(e) => setBookingReason(e.target.value)}
-                      placeholder="Describe symptoms, questions, or drug prescription renewal demands..."
-                      rows={3}
-                      className="w-full bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 focus:border-indigo-600 focus:outline-none rounded-lg text-xs py-2 px-3 text-slate-900 dark:text-white font-semibold"
-                    />
-                  </div>
-
-                  <button 
-                    id="pat-book-submit-btn"
-                    type="submit"
-                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-md shadow-indigo-600/10 cursor-pointer"
-                  >
-                    <Clock className="w-4 h-4" />
-                    <span>Confirm Clinic Appointment</span>
-                  </button>
-                </form>
-              </div>
-
-              {/* Clinics Directory & Booking Logs Lists */}
-              <div className="lg:col-span-2 space-y-6">
-                {/* Booked appointment list */}
-                <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-                  <h4 className="font-bold text-xs text-slate-900 dark:text-white mb-4">My Booked Sessions</h4>
-                  <div className="space-y-3">
-                    {bookings.length === 0 ? (
-                      <div className="text-center py-6 border border-dashed border-slate-200 rounded-xl text-slate-400 text-xs font-bold bg-slate-50/50 dark:bg-slate-900">
-                        No clinical consultations scheduled yet. Choose a doctor or specialist slot to reserve!
-                      </div>
-                    ) : (
-                      bookings.map(b => (
-                        <div key={b.id} className="p-4 rounded-xl border border-slate-150 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                          <div className="flex items-center gap-3">
-                            <img src={b.providerAvatar} alt={b.providerName} className="w-10 h-10 rounded-full object-cover border border-slate-200" />
-                            <div>
-                              <h5 className="font-bold text-xs text-slate-900 dark:text-white leading-none">{b.providerName}</h5>
-                              <p className="text-[10px] text-slate-400 mt-1">{b.specialty}</p>
-                              <p className="text-[11px] text-slate-500 font-bold mt-2 flex items-center gap-1">
-                                <span className="bg-indigo-50 dark:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 px-2.5 py-0.5 rounded text-[10px]">
-                                  {b.mode}
-                                </span>
-                                <span>on {b.dateTime}</span>
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 justify-end">
-                            <span className="bg-green-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 font-bold px-2.5 py-1 rounded text-[10px]">
-                              Confirmed
-                            </span>
-                            <button 
-                              onClick={() => onCancelBooking(b.id)}
-                              className="p-1 px-3 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-lg text-[10px] transition cursor-pointer"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Professional Clinician Cards */}
-                <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-                  <h4 className="font-bold text-xs text-slate-900 dark:text-white mb-4">Available Doctors & Healthcare Providers</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {providers.map(p => (
-                      <div key={p.id} className="p-4 rounded-xl border border-slate-200 hover:border-indigo-400 dark:border-slate-800 transition flex flex-col justify-between">
-                        <div className="flex items-start gap-3">
-                          <img src={p.avatar} alt={p.name} className="w-11 h-11 rounded-full object-cover border shrink-0" />
-                          <div>
-                            <h5 className="font-bold text-xs text-slate-900 dark:text-white leading-none">{p.name}</h5>
-                            <p className="text-[10px] text-slate-400 mt-1">{p.specialty}</p>
-                            <p className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 mt-2">{p.hospital}</p>
-                            <p className="text-[11px] text-slate-400 mt-1">{p.location}</p>
-                          </div>
-                        </div>
-                        <div className="pt-3 border-t border-slate-100 dark:border-slate-800 mt-3 flex items-center justify-between">
-                          <span className="text-[11px] font-black text-slate-800 dark:text-white">Fee: {p.fee}</span>
-                          <button 
-                            type="button"
-                            onClick={() => {
-                              setBookingProviderId(p.id);
-                              if (p.slots.length > 0) {
-                                setBookingDateTime(p.slots[0]);
-                              }
-                              onTriggerToast(`Selected ${p.name}. Review slots on the left menu Form.`, 'info');
-                            }}
-                            className="p-1.5 px-3 bg-indigo-600 hover:bg-slate-900 text-white font-bold rounded-lg text-[10px] transition cursor-pointer"
-                          >
-                            Select Slots
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* GAP Health GAP-2: Ahomka Ho Logs Well-being tab */}
         {activeTab === 'ahomka' && (
@@ -1820,7 +1828,7 @@ export default function PatientLayout({
                           <p className="text-[10px] text-slate-500 mt-1">Resting tachycardia screen stable.</p>
                         </div>
                       ) : (
-                        <h4 className="text-base font-bold text-slate-400 mt-2">72 bpm (preset)</h4>
+                        <h4 className="text-base font-bold text-slate-400 mt-2">No pulse logged yet</h4>
                       )}
                     </div>
                     <div className="w-12 h-12 rounded-full bg-indigo-50 dark:bg-indigo-950/20 flex items-center justify-center text-indigo-600">
@@ -1838,7 +1846,7 @@ export default function PatientLayout({
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-6">
                       <div>
                         <h4 className="font-bold text-sm text-slate-900 dark:text-white">Multi-Reading Longitudinal Trends</h4>
-                        <p className="text-[10px] text-slate-500">Ahomka Ho calculated blood pressure indices</p>
+                        <p className="text-[10px] text-slate-500">Ahomka Ho calculated blood pressure & heart rate indices</p>
                       </div>
                       
                       {/* Interactive toggle view pagination dots for chart */}
@@ -1859,153 +1867,212 @@ export default function PatientLayout({
                         >
                           Diastolic Trend
                         </button>
+                        <button
+                          onClick={() => setVitalsChartView('pulse')}
+                          className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all ${
+                            vitalsChartView === 'pulse' ? 'bg-rose-500 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                          }`}
+                        >
+                          Heart Rate Trend
+                        </button>
                       </div>
                     </div>
 
                     <div className="w-full h-[220px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart 
-                          data={ahomkaEntries.slice().reverse()} 
-                          margin={{ top: 5, right: 5, left: -25, bottom: 0 }}
-                          accessibilityLayer={true}
-                          onMouseMove={(e) => {
-                            if (e && e.activeTooltipIndex !== undefined) {
-                              setIsHoveringChart(true);
-                            }
-                          }}
-                          onMouseLeave={() => {
-                            setIsHoveringChart(false);
-                          }}
-                        >
-                          <defs>
-                            <linearGradient id="colorSys" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.2}/>
-                              <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
-                            </linearGradient>
-                            <linearGradient id="colorDia" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#059669" stopOpacity={0.2}/>
-                              <stop offset="95%" stopColor="#059669" stopOpacity={0}/>
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.15)" />
-                          <XAxis dataKey="timestamp" fontSize={8} stroke="#94a3b8" />
-                          <YAxis fontSize={9} domain={[40, 160]} stroke="#94a3b8" />
-                          <Tooltip 
-                            active={true}
-                            {...({ coordinate: (!isHoveringChart && defaultTooltipCoord) ? defaultTooltipCoord : undefined } as any)}
-                            content={({ payload }) => {
-                              const hasPayload = payload && payload.length > 0;
-                              const reversedEntries = ahomkaEntries.slice().reverse();
-                              const defaultEntry = reversedEntries[reversedEntries.length - 1]; // latest entry
-                              const entry = hasPayload ? payload[0].payload : defaultEntry;
-                              
-                              if (!entry) return null;
-                              
-                              return (
-                                <div className="bg-slate-900/95 dark:bg-slate-950/95 border border-slate-800 text-white rounded-xl p-3 shadow-2xl space-y-1.5 text-left border-l-4 border-l-indigo-500 font-sans min-w-[155px]">
-                                  <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">
-                                    {entry.timestamp}
-                                  </div>
-                                  <div className="space-y-1">
-                                    <div className="flex items-center justify-between gap-4">
-                                      <span className="text-slate-350 text-[11px] font-medium">Systolic:</span>
-                                      <span className="font-mono text-xs font-bold text-white">{entry.systolic} mmHg</span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-4">
-                                      <span className="text-slate-350 text-[11px] font-medium">Diastolic:</span>
-                                      <span className="font-mono text-xs font-bold text-emerald-400">{entry.diastolic} mmHg</span>
-                                    </div>
-                                    <div className="flex items-center justify-between gap-4">
-                                      <span className="text-slate-350 text-[11px] font-medium">Pulse:</span>
-                                      <span className="font-mono text-xs font-bold text-rose-450">{entry.pulse || 'N/A'} bpm</span>
-                                    </div>
-                                  </div>
-                                  {entry.feeling && (
-                                    <div className="pt-1.5 border-t border-slate-850 text-[9px] text-slate-450 italic break-words max-w-[150px]">
-                                      "{entry.feeling}"
-                                    </div>
-                                  )}
-                                </div>
-                              );
+                      {ahomkaEntries.length === 0 ? (
+                        <div className="w-full h-full flex flex-col items-center justify-center border border-dashed border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-900/40 text-center p-6 space-y-2">
+                          <div className="w-10 h-10 rounded-full bg-indigo-50 dark:bg-indigo-950/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                            <Activity className="w-5 h-5" />
+                          </div>
+                          <p className="text-xs font-bold text-slate-500">No longitudinal trends logged yet.</p>
+                          <p className="text-[10px] text-slate-400 max-w-sm">Use the "Log Today's Entry" button on the Ahomka Ho Well-being screen to start cataloging blood pressure, blood glucose, or pulse rates.</p>
+                        </div>
+                      ) : (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart 
+                            data={ahomkaEntries.slice().reverse()} 
+                            margin={{ top: 5, right: 5, left: -25, bottom: 0 }}
+                            accessibilityLayer={true}
+                            onMouseMove={(e) => {
+                              if (e && e.activeTooltipIndex !== undefined) {
+                                setIsHoveringChart(true);
+                              }
                             }}
-                          />
-                          {vitalsChartView === 'systolic' ? (
-                            <Area 
-                              type="monotone" 
-                              dataKey="systolic" 
-                              stroke="#4f46e5" 
-                              strokeWidth={2} 
-                              fillOpacity={1} 
-                              fill="url(#colorSys)" 
-                              name="Systolic Average (mmHg)" 
-                              dot={(props: any) => {
-                                const { cx, cy, index } = props;
-                                const isLast = index === (ahomkaEntries.length - 1);
-                                if (isLast && cx && cy) {
-                                  if (!defaultTooltipCoord || Math.abs(defaultTooltipCoord.x - cx) > 1 || Math.abs(defaultTooltipCoord.y - cy) > 1) {
-                                    setTimeout(() => {
-                                      setDefaultTooltipCoord({ x: cx - 75, y: cy - 130 });
-                                    }, 50);
-                                  }
-                                }
+                            onMouseLeave={() => {
+                              setIsHoveringChart(false);
+                            }}
+                          >
+                            <defs>
+                              <linearGradient id="colorSys" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.2}/>
+                                <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
+                              </linearGradient>
+                              <linearGradient id="colorDia" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#059669" stopOpacity={0.2}/>
+                                <stop offset="95%" stopColor="#059669" stopOpacity={0}/>
+                              </linearGradient>
+                              <linearGradient id="colorPulse" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.2}/>
+                                <stop offset="95%" stopColor="#f43f5e" stopOpacity={0}/>
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.15)" />
+                            <XAxis dataKey="timestamp" fontSize={8} stroke="#94a3b8" />
+                            <YAxis fontSize={9} domain={[40, 160]} stroke="#94a3b8" />
+                            <Tooltip 
+                              active={true}
+                              {...({ coordinate: (!isHoveringChart && defaultTooltipCoord) ? defaultTooltipCoord : undefined } as any)}
+                              content={({ payload }) => {
+                                const hasPayload = payload && payload.length > 0;
+                                const reversedEntries = ahomkaEntries.slice().reverse();
+                                const defaultEntry = reversedEntries[reversedEntries.length - 1]; // latest entry
+                                const entry = hasPayload ? payload[0].payload : defaultEntry;
+                                
+                                if (!entry) return null;
+                                
                                 return (
-                                  <circle 
-                                    key={`dot-sys-${index}`}
-                                    cx={cx} 
-                                    cy={cy} 
-                                    r={isLast ? 6.5 : 4} 
-                                    stroke="#ffffff" 
-                                    strokeWidth={isLast ? 2.5 : 1.5} 
-                                    fill="#4f46e5" 
-                                    className={isLast ? "animate-pulse shadow-sm" : ""}
-                                  />
+                                  <div className="bg-slate-900/95 dark:bg-slate-950/95 border border-slate-800 text-white rounded-xl p-3 shadow-2xl space-y-1.5 text-left border-l-4 border-l-indigo-500 font-sans min-w-[155px]">
+                                    <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">
+                                      {entry.timestamp}
+                                    </div>
+                                    <div className="space-y-1">
+                                      <div className="flex items-center justify-between gap-4">
+                                        <span className="text-slate-300 text-[11px] font-medium">Systolic:</span>
+                                        <span className="font-mono text-xs font-bold text-white">{entry.systolic} mmHg</span>
+                                      </div>
+                                      <div className="flex items-center justify-between gap-4">
+                                        <span className="text-slate-300 text-[11px] font-medium">Diastolic:</span>
+                                        <span className="font-mono text-xs font-bold text-emerald-400">{entry.diastolic} mmHg</span>
+                                      </div>
+                                      <div className="flex items-center justify-between gap-4">
+                                        <span className="text-slate-300 text-[11px] font-medium">Pulse:</span>
+                                        <span className="font-mono text-xs font-bold text-rose-400">{entry.pulse || 'N/A'} bpm</span>
+                                      </div>
+                                    </div>
+                                    {entry.feeling && (
+                                      <div className="pt-1.5 border-t border-slate-800 text-[9px] text-slate-400 italic break-words max-w-[150px]">
+                                        "{entry.feeling}"
+                                      </div>
+                                    )}
+                                  </div>
                                 );
-                              }} 
-                              activeDot={{ r: 8, strokeWidth: 2, stroke: '#ffffff' }} 
+                              }}
                             />
-                          ) : (
-                            <Area 
-                              type="monotone" 
-                              dataKey="diastolic" 
-                              stroke="#059669" 
-                              strokeWidth={2} 
-                              fillOpacity={1} 
-                              fill="url(#colorDia)" 
-                              name="Diastolic Average (mmHg)" 
-                              dot={(props: any) => {
-                                const { cx, cy, index } = props;
-                                const isLast = index === (ahomkaEntries.length - 1);
-                                if (isLast && cx && cy) {
-                                  if (!defaultTooltipCoord || Math.abs(defaultTooltipCoord.x - cx) > 1 || Math.abs(defaultTooltipCoord.y - cy) > 1) {
-                                    setTimeout(() => {
-                                      setDefaultTooltipCoord({ x: cx - 75, y: cy - 130 });
-                                    }, 50);
+                            {vitalsChartView === 'systolic' && (
+                              <Area 
+                                type="monotone" 
+                                dataKey="systolic" 
+                                stroke="#4f46e5" 
+                                strokeWidth={2} 
+                                fillOpacity={1} 
+                                fill="url(#colorSys)" 
+                                name="Systolic Average (mmHg)" 
+                                dot={(props: any) => {
+                                  const { cx, cy, index } = props;
+                                  const isLast = index === (ahomkaEntries.length - 1);
+                                  if (isLast && cx && cy) {
+                                    if (!defaultTooltipCoord || Math.abs(defaultTooltipCoord.x - cx) > 1 || Math.abs(defaultTooltipCoord.y - cy) > 1) {
+                                      setTimeout(() => {
+                                        setDefaultTooltipCoord({ x: cx - 75, y: cy - 130 });
+                                      }, 50);
+                                    }
                                   }
-                                }
-                                return (
-                                  <circle 
-                                    key={`dot-dia-${index}`}
-                                    cx={cx} 
-                                    cy={cy} 
-                                    r={isLast ? 6.5 : 4} 
-                                    stroke="#ffffff" 
-                                    strokeWidth={isLast ? 2.5 : 1.5} 
-                                    fill="#059669" 
-                                    className={isLast ? "animate-pulse shadow-sm" : ""}
-                                  />
-                                );
-                              }} 
-                              activeDot={{ r: 8, strokeWidth: 2, stroke: '#ffffff' }} 
-                            />
-                          )}
-                        </AreaChart>
-                      </ResponsiveContainer>
+                                  return (
+                                    <circle 
+                                      key={`dot-sys-${index}`}
+                                      cx={cx} 
+                                      cy={cy} 
+                                      r={isLast ? 6.5 : 4} 
+                                      stroke="#ffffff" 
+                                      strokeWidth={isLast ? 2.5 : 1.5} 
+                                      fill="#4f46e5" 
+                                      className={isLast ? "animate-pulse shadow-sm" : ""}
+                                    />
+                                  );
+                                }} 
+                                activeDot={{ r: 8, strokeWidth: 2, stroke: '#ffffff' }} 
+                              />
+                            )}
+                            {vitalsChartView === 'diastolic' && (
+                              <Area 
+                                type="monotone" 
+                                dataKey="diastolic" 
+                                stroke="#059669" 
+                                strokeWidth={2} 
+                                fillOpacity={1} 
+                                fill="url(#colorDia)" 
+                                name="Diastolic Average (mmHg)" 
+                                dot={(props: any) => {
+                                  const { cx, cy, index } = props;
+                                  const isLast = index === (ahomkaEntries.length - 1);
+                                  if (isLast && cx && cy) {
+                                    if (!defaultTooltipCoord || Math.abs(defaultTooltipCoord.x - cx) > 1 || Math.abs(defaultTooltipCoord.y - cy) > 1) {
+                                      setTimeout(() => {
+                                        setDefaultTooltipCoord({ x: cx - 75, y: cy - 130 });
+                                      }, 50);
+                                    }
+                                  }
+                                  return (
+                                    <circle 
+                                      key={`dot-dia-${index}`}
+                                      cx={cx} 
+                                      cy={cy} 
+                                      r={isLast ? 6.5 : 4} 
+                                      stroke="#ffffff" 
+                                      strokeWidth={isLast ? 2.5 : 1.5} 
+                                      fill="#059669" 
+                                      className={isLast ? "animate-pulse shadow-sm" : ""}
+                                    />
+                                  );
+                                }} 
+                                activeDot={{ r: 8, strokeWidth: 2, stroke: '#ffffff' }} 
+                              />
+                            )}
+                            {vitalsChartView === 'pulse' && (
+                              <Area 
+                                type="monotone" 
+                                dataKey="pulse" 
+                                stroke="#f43f5e" 
+                                strokeWidth={2} 
+                                fillOpacity={1} 
+                                fill="url(#colorPulse)" 
+                                name="Heart Rate (BPM)" 
+                                dot={(props: any) => {
+                                  const { cx, cy, index } = props;
+                                  const isLast = index === (ahomkaEntries.length - 1);
+                                  if (isLast && cx && cy) {
+                                    if (!defaultTooltipCoord || Math.abs(defaultTooltipCoord.x - cx) > 1 || Math.abs(defaultTooltipCoord.y - cy) > 1) {
+                                      setTimeout(() => {
+                                        setDefaultTooltipCoord({ x: cx - 75, y: cy - 130 });
+                                      }, 50);
+                                    }
+                                  }
+                                  return (
+                                    <circle 
+                                      key={`dot-pulse-${index}`}
+                                      cx={cx} 
+                                      cy={cy} 
+                                      r={isLast ? 6.5 : 4} 
+                                      stroke="#ffffff" 
+                                      strokeWidth={isLast ? 2.5 : 1.5} 
+                                      fill="#f43f5e" 
+                                      className={isLast ? "animate-pulse shadow-sm" : ""}
+                                    />
+                                  );
+                                }} 
+                                activeDot={{ r: 8, strokeWidth: 2, stroke: '#ffffff' }} 
+                              />
+                            )}
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      )}
                     </div>
 
                     {/* Pagination indicators visual cues */}
                     <div className="flex justify-center gap-1.5 mt-3">
                       <span className={`w-2 h-2 rounded-full transition-all ${vitalsChartView === 'systolic' ? 'bg-indigo-600 w-4' : 'bg-slate-200'}`}></span>
                       <span className={`w-2 h-2 rounded-full transition-all ${vitalsChartView === 'diastolic' ? 'bg-emerald-600 w-4' : 'bg-slate-200'}`}></span>
+                      <span className={`w-2 h-2 rounded-full transition-all ${vitalsChartView === 'pulse' ? 'bg-rose-500 w-4' : 'bg-slate-200'}`}></span>
                     </div>
 
                   </div>
@@ -2058,7 +2125,7 @@ export default function PatientLayout({
                       <p className="text-[9px] text-slate-400">Clinical-ready 3-Reading systolic and diastolic snapshots</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="bg-slate-100 dark:bg-slate-800 text-slate-650 dark:text-slate-350 text-[10px] font-bold px-2 py-0.5 rounded shrink-0">
+                      <span className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-bold px-2 py-0.5 rounded shrink-0">
                         {filteredAhomkaEntries.length} entries
                       </span>
                       {ahomkaEntries.length > 0 && (
@@ -2075,7 +2142,7 @@ export default function PatientLayout({
                     </div>
                   </div>
 
-                  <div className="divide-y divide-slate-150 dark:divide-slate-800 overflow-x-auto">
+                  <div className="divide-y divide-slate-200 dark:divide-slate-800 overflow-x-auto">
                     {filteredAhomkaEntries.length === 0 ? (
                       <div className="p-8 text-center text-slate-400 text-xs">No matching blood pressure vitals logs found.</div>
                     ) : (
@@ -2129,7 +2196,7 @@ export default function PatientLayout({
                                 onClick={() => {
                                   onTriggerToast(`Readings logged: ${e.readings?.map(r => `${r.systolic}/${r.diastolic} (P:${r.pulse})`).join(' | ')}`);
                                 }}
-                                className="p-1 px-2.5 bg-slate-105 border hover:bg-slate-200 rounded text-[9px] font-bold transition flex items-center gap-1 cursor-pointer"
+                                className="p-1 px-2.5 bg-slate-100 border hover:bg-slate-200 rounded text-[9px] font-bold transition flex items-center gap-1 cursor-pointer"
                               >
                                 View Details ({e.readings.length})
                               </button>
@@ -2147,7 +2214,7 @@ export default function PatientLayout({
             {/* WIZARD STEP 1: General Feeling question */}
             {vitalsStep === 'step1' && (
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
-                <div className="p-6 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-150 flex justify-between items-center">
+                <div className="p-6 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 flex justify-between items-center">
                   <div>
                     <span className="text-[9px] font-bold tracking-widest text-indigo-600 uppercase font-mono">Step 1 of 5</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">Physical Comfort State</h3>
@@ -2172,7 +2239,7 @@ export default function PatientLayout({
                         key={opt.key}
                         onClick={() => setVitalsFeeling(opt.key)}
                         className={`p-4 rounded-xl border cursor-pointer transition flex items-start gap-4 ${
-                          vitalsFeeling === opt.key ? 'border-indigo-600 bg-indigo-50/40 dark:bg-indigo-950/20 shadow-xs' : 'border-slate-200 dark:border-slate-850 bg-white dark:bg-slate-900 ' + opt.bg
+                          vitalsFeeling === opt.key ? 'border-indigo-600 bg-indigo-50/40 dark:bg-indigo-950/20 shadow-xs' : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 ' + opt.bg
                         }`}
                       >
                         <span className="text-2xl shrink-0">{opt.icon}</span>
@@ -2203,7 +2270,7 @@ export default function PatientLayout({
             {/* WIZARD STEP 2: Symptoms verification checklist */}
             {vitalsStep === 'step2' && (
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
-                <div className="p-6 bg-slate-50 border-b border-slate-150 flex justify-between items-center">
+                <div className="p-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                   <div>
                     <span className="text-[9px] font-bold tracking-widest text-indigo-600 uppercase font-mono">Step 2 of 5</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">Active Symptoms Checklist</h3>
@@ -2271,7 +2338,7 @@ export default function PatientLayout({
             {/* WIZARD STEP 3: Blood Pressure Reading #1 Input */}
             {vitalsStep === 'reading1' && (
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
-                <div className="p-6 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-150 dark:border-slate-800 flex justify-between items-center">
+                <div className="p-6 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
                   <div>
                     <span className="text-[9px] font-bold tracking-widest text-indigo-600 uppercase font-mono">Step 3 of 5</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">First Logged Measurement</h3>
@@ -2299,7 +2366,7 @@ export default function PatientLayout({
                           type="number"
                           value={sys1}
                           onChange={(e) => setSys1(e.target.value)}
-                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-705 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-600"
                         />
                         <span className="text-[10px] text-slate-400 font-bold">mmHg</span>
                       </div>
@@ -2313,7 +2380,7 @@ export default function PatientLayout({
                           type="number"
                           value={dia1}
                           onChange={(e) => setDia1(e.target.value)}
-                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-705 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-600"
                         />
                         <span className="text-[10px] text-slate-400 font-bold">mmHg</span>
                       </div>
@@ -2327,13 +2394,24 @@ export default function PatientLayout({
                           type="number"
                           value={pulse1}
                           onChange={(e) => setPulse1(e.target.value)}
-                          className="w-16 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-705 font-mono font-black text-xl py-3 rounded-lg text-indigo-600 dark:text-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                          className="w-16 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-indigo-600 dark:text-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-600"
                         />
                         <span className="text-[10px] text-slate-400 font-bold">bpm</span>
                       </div>
                     </div>
 
                   </div>
+
+                  {/* Realtime Posture & Value Warning Tooltip */}
+                  {((sys1 && parseInt(sys1) >= 140) || (dia1 && parseInt(dia1) >= 90)) && (
+                    <div className="bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-350 p-3.5 rounded-xl text-xs leading-relaxed border border-rose-200 dark:border-rose-900/30 flex gap-2.5 items-start">
+                      <div className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0 mt-1 animate-ping" />
+                      <div>
+                        <span className="font-bold block">Elevated Value Guideline Notice:</span>
+                        First Reading resides in the Hypertension range. Please review sitting posture, relax shoulder tension, and take slow, deep inhalations during the upcoming intermission.
+                      </div>
+                    </div>
+                  )}
 
                   <div className="flex justify-between items-center pt-4 border-t border-slate-100 dark:border-slate-800">
                     <button onClick={() => setVitalsStep('step2')} className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 font-bold">
@@ -2344,7 +2422,7 @@ export default function PatientLayout({
                       disabled={!sys1.trim() || !dia1.trim() || !pulse1.trim()}
                       className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs rounded-lg transition"
                     >
-                      Next: Start Rest Period (60s)
+                      Next: Start Rest Period (45s)
                     </button>
                   </div>
                 </div>
@@ -2354,7 +2432,7 @@ export default function PatientLayout({
             {/* WIZARD COOLDOWN STEP 4: Rest Intermission Timer 1 with slideshow guides */}
             {vitalsStep === 'rest1' && (
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
-                <div className="p-6 bg-slate-50 border-b border-slate-150 flex justify-between items-center">
+                <div className="p-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                   <div>
                     <span className="text-[9px] font-bold tracking-widest text-indigo-600 uppercase font-mono">Step 3 of 5 (Rest Cooldown)</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">White-Coat Comfort Buffer</h3>
@@ -2371,7 +2449,7 @@ export default function PatientLayout({
                         <circle cx="64" cy="64" r="56" fill="transparent" stroke="#f1f5f9" strokeWidth="6" />
                         <circle cx="64" cy="64" r="56" fill="transparent" stroke="#059669" strokeWidth="6"
                           strokeDasharray={351.8}
-                          strokeDashoffset={351.8 * (1 - restSeconds / 60)}
+                          strokeDashoffset={351.8 * (1 - restSeconds / 45)}
                           strokeLinecap="round"
                           className="transition-all duration-1000"
                         />
@@ -2431,7 +2509,7 @@ export default function PatientLayout({
             {/* WIZARD STEP 5: Blood Pressure Reading #2 Input */}
             {vitalsStep === 'reading2' && (
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
-                <div className="p-6 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-150 dark:border-slate-800 flex justify-between items-center">
+                <div className="p-6 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
                   <div>
                     <span className="text-[9px] font-bold tracking-widest text-indigo-600 uppercase font-mono">Step 4 of 5</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">Second Logged Measurement</h3>
@@ -2444,12 +2522,12 @@ export default function PatientLayout({
                     <CheckCircle className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
                     <div>
                       <span className="font-bold block">Stability verified:</span>
-                      Your body has stabilized for over 1 minute. Place the second cuff inflation and write in the indices below.
+                      Your body has stabilized during the 45-second comfort period. Place the second cuff inflation and write in the indices below.
                     </div>
                   </div>
 
                   {/* BP Log cuff inputs panel */}
-                  <div className="bg-slate-50/55 dark:bg-slate-800/40 p-6 rounded-2xl border border-slate-205 dark:border-slate-700/80 flex justify-around items-center gap-6">
+                  <div className="bg-slate-50/55 dark:bg-slate-800/40 p-6 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex justify-around items-center gap-6">
                     
                     {/* Systolic */}
                     <div className="text-center space-y-2">
@@ -2495,6 +2573,17 @@ export default function PatientLayout({
 
                   </div>
 
+                  {/* Realtime Posture & Value Warning Tooltip */}
+                  {((sys2 && parseInt(sys2) >= 140) || (dia2 && parseInt(dia2) >= 90)) && (
+                    <div className="bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-350 p-3.5 rounded-xl text-xs leading-relaxed border border-rose-200 dark:border-rose-900/30 flex gap-2.5 items-start">
+                      <div className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0 mt-1 animate-ping" />
+                      <div>
+                        <span className="font-bold block">Persistent Elevated Range Detected:</span>
+                        Second Reading is also elevated. Maintain an upright spine, avoid talking or swallowing during cuff inflations, and rest fully during the final intermission queue.
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex justify-between items-center pt-4 border-t border-slate-100 dark:border-slate-800">
                     <button onClick={() => setVitalsStep('reading1')} className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 font-bold">
                       Back
@@ -2504,7 +2593,7 @@ export default function PatientLayout({
                       disabled={!sys2.trim() || !dia2.trim() || !pulse2.trim()}
                       className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs rounded-lg transition"
                     >
-                      Next: Start Rest Period (60s)
+                      Next: Start Rest Period (45s)
                     </button>
                   </div>
                 </div>
@@ -2514,7 +2603,7 @@ export default function PatientLayout({
             {/* WIZARD COOLDOWN STEP 6: Rest Intermission Timer 2 with slideshow guides */}
             {vitalsStep === 'rest2' && (
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
-                <div className="p-6 bg-slate-50 border-b border-slate-150 flex justify-between items-center">
+                <div className="p-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                   <div>
                     <span className="text-[9px] font-bold tracking-widest text-indigo-600 uppercase font-mono">Step 4 of 5 (Rest Cooldown)</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">Second Comfort Intermission</h3>
@@ -2531,7 +2620,7 @@ export default function PatientLayout({
                         <circle cx="64" cy="64" r="56" fill="transparent" stroke="#f1f5f9" strokeWidth="6" />
                         <circle cx="64" cy="64" r="56" fill="transparent" stroke="#059669" strokeWidth="6"
                           strokeDasharray={351.8}
-                          strokeDashoffset={351.8 * (1 - restSeconds / 60)}
+                          strokeDashoffset={351.8 * (1 - restSeconds / 45)}
                           strokeLinecap="round"
                           className="transition-all duration-1000"
                         />
@@ -2591,7 +2680,7 @@ export default function PatientLayout({
             {/* WIZARD STEP 7: Blood Pressure Reading #3 & Medication Adherence */}
             {vitalsStep === 'reading3' && (
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
-                <div className="p-6 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-150 dark:border-slate-800 flex justify-between items-center">
+                <div className="p-6 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
                   <div>
                     <span className="text-[9px] font-bold tracking-widest text-indigo-600 uppercase font-mono">Step 5 of 5</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">Final Reading & Medication Adherence</h3>
@@ -2602,7 +2691,7 @@ export default function PatientLayout({
                 <form onSubmit={handleVitalsSubmit} className="p-6 space-y-6">
                   
                   {/* BP Log cuff inputs panel */}
-                  <div className="bg-slate-50/55 dark:bg-slate-800/40 p-6 rounded-2xl border border-slate-205 dark:border-slate-700/80 flex justify-around items-center gap-6">
+                  <div className="bg-slate-50/55 dark:bg-slate-800/40 p-6 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex justify-around items-center gap-6">
                     
                     {/* Systolic */}
                     <div className="text-center space-y-2">
@@ -2642,7 +2731,7 @@ export default function PatientLayout({
                           type="number"
                           value={pulse3}
                           onChange={(e) => setPulse3(e.target.value)}
-                          className="w-16 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-indigo-650 dark:text-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                          className="w-16 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-indigo-600 dark:text-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-600"
                           required
                         />
                         <span className="text-[10px] text-slate-400 font-bold">bpm</span>
@@ -2651,9 +2740,20 @@ export default function PatientLayout({
 
                   </div>
 
+                  {/* Realtime Posture & Value Warning Tooltip */}
+                  {((sys3 && parseInt(sys3) >= 140) || (dia3 && parseInt(dia3) >= 90)) && (
+                    <div className="bg-rose-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-350 p-3.5 rounded-xl text-xs leading-relaxed border border-rose-200 dark:border-rose-900/30 flex gap-2.5 items-start">
+                      <div className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0 mt-1 animate-ping" />
+                      <div>
+                        <span className="font-bold block">Final Elevated Measurement Alert:</span>
+                        The third reading is also high. This indicates a cumulative high blood pressure average. Your daily average logged will carry a "High Risk" indicator inside the clinical team's dashboard.
+                      </div>
+                    </div>
+                  )}
+
                   {/* Medication adherence checklist within search parameters */}
                   <div className="space-y-3">
-                    <label className="font-bold text-xs text-slate-755 dark:text-slate-350 block uppercase tracking-wide">
+                    <label className="font-bold text-xs text-slate-700 dark:text-slate-300 block uppercase tracking-wide">
                       Within the past 4 days, did you take your BP medication?
                     </label>
                     <p className="text-[11px] text-slate-400">Strict medical guideline compliance safeguards cardiovascular baselines against sudden stroke episodes.</p>
@@ -2670,8 +2770,8 @@ export default function PatientLayout({
                           onClick={() => setVitalsMedication(adherenceOpt)}
                           className={`p-3 rounded-lg border text-xs cursor-pointer flex items-center gap-3 transition ${
                             vitalsMedication === adherenceOpt 
-                              ? 'border-indigo-600 bg-indigo-50/20 dark:bg-indigo-950/20 font-bold text-indigo-850 dark:text-indigo-300' 
-                              : 'hover:bg-slate-50 dark:hover:bg-slate-805 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+                              ? 'border-indigo-600 bg-indigo-50/20 dark:bg-indigo-950/20 font-bold text-indigo-800 dark:text-indigo-300' 
+                              : 'hover:bg-slate-50 dark:hover:bg-slate-800 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
                           }`}
                         >
                           <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
@@ -2686,7 +2786,7 @@ export default function PatientLayout({
                   </div>
 
                   <div className="flex justify-between items-center pt-4 border-t border-slate-100 dark:border-slate-800">
-                    <button type="button" onClick={() => setVitalsStep('reading2')} className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-450 hover:text-slate-700 dark:hover:text-slate-200 font-bold">
+                    <button type="button" onClick={() => setVitalsStep('reading2')} className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 font-bold">
                       Back
                     </button>
                     <button
@@ -2823,18 +2923,13 @@ export default function PatientLayout({
 
         {/* GAP Health GAP-3: Community Support Forums tab */}
         {activeTab === 'community' && (
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-805 shadow-sm flex h-[480px] overflow-hidden">
+          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm flex h-[480px] overflow-hidden">
             
             {/* Channels select list */}
-            <div className="w-56 border-r border-slate-150 dark:border-slate-800 shrink-0 flex flex-col pt-4 bg-slate-50/40 dark:bg-slate-900/10">
+            <div className="w-56 border-r border-slate-200 dark:border-slate-800 shrink-0 flex flex-col pt-4 bg-slate-50/40 dark:bg-slate-900/10">
               <span className="text-[10px] font-black text-slate-400 uppercase px-4 mb-3">Support Forum Boards</span>
               <div className="flex-1 overflow-y-auto space-y-1">
-                {[
-                  { id: '#nutrition-and-diabetes', label: 'Nutrition & Diabetes', desc: 'Millet eating, glucose spike limits' },
-                  { id: '#cardio-wellness', label: 'Cardio Wellness', desc: 'Salt limits, walks, BP baseline stability' },
-                  { id: '#mental-fitness', label: 'Mental Fitness', desc: 'Respiration stress reduction & REM sleep' },
-                  { id: '#reproductive-health', label: 'Reproductive Health', desc: 'Neonatal care advisory support' }
-                ].map(ch => (
+                {forumBoards.map(ch => (
                   <div 
                     key={ch.id}
                     onClick={() => setCommSelectedChannel(ch.id)}
@@ -2862,7 +2957,13 @@ export default function PatientLayout({
               <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-white dark:bg-slate-950/30">
                 {communityMessages.filter(msg => msg.channel === commSelectedChannel).map(msg => (
                   <div key={msg.id} className="flex gap-3">
-                    <img src={msg.senderAvatar} alt={msg.senderName} className="w-8 h-8 rounded-full border shrink-0 object-cover" />
+                    {msg.senderAvatar ? (
+                      <img src={msg.senderAvatar} alt={msg.senderName} className="w-8 h-8 rounded-full border shrink-0 object-cover bg-white" />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center text-[10px] font-black shrink-0 border border-slate-200 dark:border-slate-800">
+                        {msg.senderName.charAt(0).toUpperCase()}
+                      </div>
+                    )}
                     <div className="flex-1 bg-slate-50 dark:bg-slate-800 p-3 rounded-xl max-w-lg text-xs leading-relaxed border border-transparent">
                       <div className="flex justify-between items-center mb-1">
                         <div className="flex items-center gap-1.5">
@@ -2925,12 +3026,18 @@ export default function PatientLayout({
                 <div className="pt-2">
                   <span className="text-[10px] font-bold text-slate-400 block mb-2">Avatar Choice Studio (Initials & Uploads)</span>
                   <div className="flex items-center gap-3 bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border dark:border-slate-800">
-                    <img 
-                      src={profAvatar || 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80'} 
-                      alt="Avatar Studio Preview" 
-                      className="w-12 h-12 rounded-full object-cover shrink-0 border border-slate-200 dark:border-slate-700 bg-white" 
-                      id="avatar-preview-thumbnail"
-                    />
+                    {profAvatar ? (
+                      <img 
+                        src={profAvatar} 
+                        alt="Avatar Studio Preview" 
+                        className="w-12 h-12 rounded-full object-cover shrink-0 border border-slate-200 dark:border-slate-700 bg-white" 
+                        id="avatar-preview-thumbnail"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center text-sm font-black shrink-0 border border-slate-200 dark:border-slate-700">
+                        {((profName || session.name || "U").charAt(0).toUpperCase())}
+                      </div>
+                    )}
                     <div className="space-y-1 w-full text-left">
                       <p className="text-[9px] font-bold text-slate-500">Pick initials style gradient or upload custom:</p>
                       
@@ -2956,7 +3063,7 @@ export default function PatientLayout({
 
                       {/* File select button */}
                       <div className="relative inline-block">
-                        <label className="py-1 px-2.5 bg-indigo-650 hover:bg-slate-900 text-white text-[9px] font-bold rounded-lg transition cursor-pointer select-none">
+                        <label className="py-1 px-2.5 bg-indigo-600 hover:bg-slate-900 text-white text-[9px] font-bold rounded-lg transition cursor-pointer select-none">
                           Upload Custom Image
                           <input 
                             type="file" 
@@ -3001,7 +3108,8 @@ export default function PatientLayout({
             </div>
           </form>
         )}
-
+          </motion.div>
+        </AnimatePresence>
       </div>
 
       {/* CONFIRMATION DIALOG MODAL FOR LOG DELETION */}

@@ -1,6 +1,6 @@
 {
-  "name": "CuraFlow Health",
+  "name": "CFL Health AI",
   "description": "A sleek, premium, full-stack clinical engagement, telehealth and wellness portal, featuring biometric diagnostics diaries, HIPAA encrypted doctor messaging, community forums, medical research library, and clinical AI summaries.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["microphone", "camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

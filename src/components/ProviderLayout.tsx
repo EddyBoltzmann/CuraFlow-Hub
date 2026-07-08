@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   HealthLog, Message, Conversation, AIChatMessage, AppUser, FAQ, Announcement, AuditLog 
 } from '../types';
@@ -33,6 +34,18 @@ export default function ProviderLayout({
 }: ProviderLayoutProps) {
   
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (isMobileMenuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isMobileMenuOpen]);
   
   // Interactive patient selected for timeline review
   const defaultPatient = users.find(u => u.role === 'patient') || users[0];
@@ -122,13 +135,127 @@ export default function ProviderLayout({
   return (
     <div className="flex-1 flex flex-col md:flex-row h-full overflow-hidden">
       
+      {/* Mobile Top Sub-Header Navigation Bar */}
+      <div className="md:hidden flex items-center justify-between bg-white dark:bg-slate-900 px-4 py-3 border-b border-slate-200 dark:border-slate-800 shrink-0 select-none">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest font-mono">Panel</span>
+          <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
+            {activeTab === 'dashboard' && 'Clinical Dashboard'}
+            {activeTab === 'directory' && 'Patient Registry'}
+            {activeTab === 'messaging' && 'Patient Communications'}
+            {activeTab === 'referrals' && 'Consults & Referrals'}
+            {activeTab === 'copilot' && 'EHR AI Co-Pilot'}
+          </span>
+        </div>
+        <button
+          onClick={() => setIsMobileMenuOpen(true)}
+          className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+          title="Open Navigation"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6h16M4 12h16m-7 6h7" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Mobile Menu Slide-out Drawer */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <div className="fixed inset-0 z-[11000] md:hidden">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.5 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="absolute inset-0 bg-slate-950 backdrop-blur-xs cursor-pointer"
+            />
+            
+            {/* Drawer Panel */}
+            <motion.div
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="absolute top-0 bottom-0 left-0 w-72 max-w-[85vw] bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 p-5 flex flex-col justify-between shadow-2xl overflow-y-auto"
+            >
+              <div className="space-y-6">
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="px-2 py-0.5 bg-indigo-600 rounded-lg flex items-center justify-center text-white text-xs font-black shadow-lg">
+                      CFL
+                    </div>
+                    <span className="font-sans font-bold text-slate-900 dark:text-white">Provider Hub</span>
+                  </div>
+                  <button
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-1">
+                  <button 
+                    onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    <Activity className="w-4 h-4" />
+                    <span>Clinical Dashboard</span>
+                  </button>
+                  
+                  <button 
+                    onClick={() => { setActiveTab('directory'); setIsMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'directory' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    <Users className="w-4 h-4" />
+                    <span>Patient Registry</span>
+                  </button>
+
+                  <button 
+                    onClick={() => { setActiveTab('messaging'); setIsMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'messaging' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    <span>Patient Communications</span>
+                  </button>
+
+                  <button 
+                    onClick={() => { setActiveTab('referrals'); setIsMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'referrals' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    <Clipboard className="w-4 h-4" />
+                    <span>Consults & Referrals</span>
+                  </button>
+
+                  <button 
+                    onClick={() => { setActiveTab('copilot'); setIsMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'copilot' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    <Brain className="w-4 h-4" />
+                    <span className="flex items-center gap-1">
+                      <span>EHR AI Co-Pilot</span>
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-100 dark:border-slate-800 pt-4 mt-6 text-center">
+                <span className="text-[9px] text-slate-400 font-mono">CFL Core Secure Platform v2.4</span>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      
       {/* Provider navigation rails sidebar */}
-      <aside className="w-full md:w-56 border-b md:border-b-0 md:border-r bg-white dark:bg-slate-900 p-4 space-y-1.5 flex md:flex-col shrink-0">
+      <aside className="hidden md:flex w-full md:w-56 border-b md:border-b-0 md:border-r bg-white dark:bg-slate-900 p-4 space-y-1.5 md:flex-col shrink-0">
         <div className="w-full space-y-1">
           <button 
             id="tab-prov-dashboard"
             onClick={() => setActiveTab('dashboard')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Activity className="w-4 h-4" />
             <span>Clinical Dashboard</span>
@@ -137,7 +264,7 @@ export default function ProviderLayout({
           <button 
             id="tab-prov-directory"
             onClick={() => setActiveTab('directory')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'directory' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'directory' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Users className="w-4 h-4" />
             <span>Patient Registry</span>
@@ -146,7 +273,7 @@ export default function ProviderLayout({
           <button 
             id="tab-prov-messaging"
             onClick={() => setActiveTab('messaging')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'messaging' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'messaging' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <MessageSquare className="w-4 h-4" />
             <span>Patient Communications</span>
@@ -155,7 +282,7 @@ export default function ProviderLayout({
           <button 
             id="tab-prov-referrals"
             onClick={() => setActiveTab('referrals')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'referrals' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'referrals' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Clipboard className="w-4 h-4" />
             <span>Consults & Referrals</span>
@@ -164,7 +291,7 @@ export default function ProviderLayout({
           <button 
             id="tab-prov-copilot"
             onClick={() => setActiveTab('copilot')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${activeTab === 'copilot' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'copilot' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Brain className="w-4 h-4" />
             <span className="flex items-center gap-1">
@@ -176,7 +303,16 @@ export default function ProviderLayout({
       </aside>
 
       {/* Provider tabs rendering viewport */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="flex-1 overflow-y-auto p-6">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
+            className="space-y-6"
+          >
         
         {/* TAB 1: Clinical General Dashboard & alerts prioritizing */}
         {activeTab === 'dashboard' && (
@@ -212,7 +348,7 @@ export default function ProviderLayout({
                         <p className="text-[10px] text-slate-400 mt-1">{cn.date}</p>
                       </div>
                     </div>
-                    <span className="text-[9px] bg-white dark:bg-slate-800 text-rose-700 dark:text-rose-450 font-bold px-2 py-0.5 rounded border border-rose-200 dark:border-rose-900/60 shadow-xs">Review Priority</span>
+                    <span className="text-[9px] bg-white dark:bg-slate-800 text-rose-700 dark:text-rose-400 font-bold px-2 py-0.5 rounded border border-rose-200 dark:border-rose-900/60 shadow-xs">Review Priority</span>
                   </div>
                 ))}
               </div>
@@ -301,7 +437,7 @@ export default function ProviderLayout({
                     className={`p-3.5 rounded-xl cursor-pointer transition border ${p.id === selectedPatId ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-900/40 text-indigo-700 dark:text-indigo-400' : 'hover:bg-slate-50 dark:hover:bg-slate-800 border-transparent text-slate-700 dark:text-slate-300'}`}
                   >
                     <p className="font-bold text-xs">{p.name}</p>
-                    <p className="text-[10px] text-slate-405 dark:text-slate-450 mt-1">{p.email}</p>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-400 mt-1">{p.email}</p>
                     <div className="flex items-center gap-1.5 mt-2">
                       <span className={`w-1.5 h-1.5 rounded-full ${p.status === 'Active' ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
                       <span className="text-[9px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">{p.status}</span>
@@ -359,7 +495,7 @@ export default function ProviderLayout({
                           <p className="text-sm font-black mt-1 text-slate-900 dark:text-white">{log.value}</p>
                           
                           {log.notes && (
-                            <p className="text-[11px] text-slate-600 dark:text-slate-350 bg-white dark:bg-slate-900 p-2 rounded border border-slate-100 dark:border-slate-800 mt-2 italic">
+                            <p className="text-[11px] text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-900 p-2 rounded border border-slate-100 dark:border-slate-800 mt-2 italic">
                               "{log.notes}"
                             </p>
                           )}
@@ -543,7 +679,7 @@ export default function ProviderLayout({
           <div className="bg-slate-950 text-white rounded-2xl p-6 h-[480px] flex flex-col justify-between overflow-hidden border border-slate-900">
             <div className="p-3 border-b border-indigo-900/30 flex justify-between items-center bg-slate-900/30 shrink-0">
               <div className="flex items-center gap-3">
-                <Brain className="w-5 h-5 text-indigo-505 animate-pulse" />
+                <Brain className="w-5 h-5 text-indigo-500 animate-pulse" />
                 <div>
                   <h4 className="font-bold text-xs text-slate-200">EHR Clinician co-pilot</h4>
                   <p className="text-[9px] text-indigo-400">Assists in telemetry syntheses, draft notices, drug interaction lookups</p>
@@ -610,7 +746,8 @@ export default function ProviderLayout({
             </form>
           </div>
           )}
-
+          </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   );

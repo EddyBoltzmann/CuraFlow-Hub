@@ -78,6 +78,13 @@ export interface AppUser {
   addressCity?: string;
   addressState?: string;
   addressZip?: string;
+  // Socio-demographic fields
+  gender?: string;
+  age?: number;
+  maritalStatus?: string;
+  employmentStatus?: string;
+  educationLevel?: string;
+  preferredLanguage?: string;
 }
 
 export interface FAQ {
@@ -157,4 +164,12 @@ export interface AppointmentBooking {
   mode: 'Video Call' | 'Audio Call' | 'Secure Chat';
   dateTime: string;
   status: 'Confirmed' | 'Completed' | 'Cancelled';
+}
+
+export interface SupportForumBoard {
+  id: string;
+  label: string;
+  desc: string;
+  createdBy: string;
+  createdDate: string;
 }
