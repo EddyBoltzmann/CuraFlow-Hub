@@ -200,3 +200,33 @@ export const defaultForumBoards: SupportForumBoard[] = [
   { id: '#mental-fitness', label: 'Mental Fitness', desc: 'Respiration stress reduction & REM sleep', createdBy: 'System', createdDate: '2026-06-10' },
   { id: '#reproductive-health', label: 'Reproductive Health', desc: 'Neonatal care advisory support', createdBy: 'System', createdDate: '2026-06-10' }
 ];
+
+// Default complaints telemetry (30 days rolling)
+export interface WeeklyComplaint {
+  week: string;
+  escalated: number;
+  resolved: number;
+  avgResponseHours: number;
+}
+
+export const defaultWeeklyComplaints: WeeklyComplaint[] = [
+  { week: 'W1 (May 10-16)', escalated: 3, resolved: 2, avgResponseHours: 4.2 },
+  { week: 'W2 (May 17-23)', escalated: 7, resolved: 4, avgResponseHours: 3.5 },
+  { week: 'W3 (May 24-30)', escalated: 12, resolved: 9, avgResponseHours: 2.8 },
+  { week: 'W4 (May 31-Jun 08)', escalated: 8, resolved: 7, avgResponseHours: 1.9 }
+];
+
+// Default engagement telemetry (30 days rolling)
+export interface EngagementDataPoint {
+  date: string;
+  activeUsers: number;
+  platformActions: number;
+}
+
+export const defaultEngagementData: EngagementDataPoint[] = [
+  { date: '06-01', activeUsers: 12, platformActions: 45 },
+  { date: '06-03', activeUsers: 18, platformActions: 72 },
+  { date: '06-05', activeUsers: 25, platformActions: 110 },
+  { date: '06-07', activeUsers: 30, platformActions: 145 },
+  { date: '06-09', activeUsers: 35, platformActions: 180 }
+];

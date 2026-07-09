@@ -9,6 +9,7 @@ import {
   CMSArticle, AppUser, FAQ, Announcement, AuditLog, HealthLog, AppointmentBooking, AhomkaEntry, SupportForumBoard 
 } from '../types';
 import { jsPDF } from 'jspdf';
+import { WeeklyComplaint, EngagementDataPoint } from '../data';
 import { 
   Activity, Users, FileText, HelpCircle, Bell, Settings, Plus, Trash2, 
   Check, ShieldAlert, Sparkles, AlertTriangle, Play, Info, EyeOff, Layout, Globe, Server, Download, RefreshCw, TrendingUp,
@@ -42,40 +43,11 @@ interface AdminLayoutProps {
   onDeleteUser?: (id: string) => void;
   forumBoards: SupportForumBoard[];
   onAddForumBoard: (board: SupportForumBoard) => void;
+  weeklyComplaints: WeeklyComplaint[];
+  onUpdateWeeklyComplaints: React.Dispatch<React.SetStateAction<WeeklyComplaint[]>>;
+  engagementData: EngagementDataPoint[];
+  onUpdateEngagementData: React.Dispatch<React.SetStateAction<EngagementDataPoint[]>>;
 }
-
-const ENGAGEMENT_DATA_30_DAYS = [
-  { date: 'May 10', activeUsers: 14, platformActions: 58 },
-  { date: 'May 11', activeUsers: 15, platformActions: 72 },
-  { date: 'May 12', activeUsers: 19, platformActions: 89 },
-  { date: 'May 13', activeUsers: 18, platformActions: 80 },
-  { date: 'May 14', activeUsers: 22, platformActions: 110 },
-  { date: 'May 15', activeUsers: 25, platformActions: 142 },
-  { date: 'May 16', activeUsers: 21, platformActions: 115 },
-  { date: 'May 17', activeUsers: 23, platformActions: 130 },
-  { date: 'May 18', activeUsers: 28, platformActions: 165 },
-  { date: 'May 19', activeUsers: 30, platformActions: 190 },
-  { date: 'May 20', activeUsers: 35, platformActions: 240 },
-  { date: 'May 21', activeUsers: 32, platformActions: 210 },
-  { date: 'May 22', activeUsers: 34, platformActions: 225 },
-  { date: 'May 23', activeUsers: 39, platformActions: 280 },
-  { date: 'May 24', activeUsers: 42, platformActions: 310 },
-  { date: 'May 25', activeUsers: 38, platformActions: 275 },
-  { date: 'May 26', activeUsers: 45, platformActions: 340 },
-  { date: 'May 27', activeUsers: 48, platformActions: 385 },
-  { date: 'May 28', activeUsers: 50, platformActions: 420 },
-  { date: 'May 29', activeUsers: 47, platformActions: 390 },
-  { date: 'May 30', activeUsers: 52, platformActions: 440 },
-  { date: 'May 31', activeUsers: 55, platformActions: 490 },
-  { date: 'Jun 01', activeUsers: 58, platformActions: 520 },
-  { date: 'Jun 02', activeUsers: 54, platformActions: 480 },
-  { date: 'Jun 03', activeUsers: 60, platformActions: 550 },
-  { date: 'Jun 04', activeUsers: 63, platformActions: 590 },
-  { date: 'Jun 05', activeUsers: 66, platformActions: 640 },
-  { date: 'Jun 06', activeUsers: 62, platformActions: 580 },
-  { date: 'Jun 07', activeUsers: 70, platformActions: 690 },
-  { date: 'Jun 08', activeUsers: 74, platformActions: 735 },
-];
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
@@ -106,9 +78,21 @@ export default function AdminLayout({
   session, users, loggedInUserIds, onSimulateTokenRefresh, articles, faqs, announcements, auditLogs, logs, bookings, ahomkaEntries,
   onAddArticle, onArchiveArticle, onModifyUserStatus, onVerifyClinician,
   onAddFAQ, onDeployAnnouncement, onTriggerToast, onBroadcastPlatformNotification,
-  onAddUser, onDeleteUser, forumBoards, onAddForumBoard
+  onAddUser, onDeleteUser, forumBoards, onAddForumBoard,
+  weeklyComplaints, onUpdateWeeklyComplaints, engagementData, onUpdateEngagementData
 }: AdminLayoutProps) {
   
+  // Dynamic complaint metrics calculations
+  const totalEscalations = (weeklyComplaints || []).reduce((acc, curr) => acc + (curr.escalated || 0), 0);
+  const resolvedEscalations = (weeklyComplaints || []).reduce((acc, curr) => acc + (curr.resolved || 0), 0);
+  const unresolvedEscalations = totalEscalations - resolvedEscalations;
+  const avgResponseTime = (weeklyComplaints || []).length > 0
+    ? ((weeklyComplaints || []).reduce((acc, curr) => acc + (curr.avgResponseHours || 0), 0) / (weeklyComplaints || []).length).toFixed(1)
+    : "0";
+  const resolutionRate = totalEscalations > 0
+    ? ((resolvedEscalations / totalEscalations) * 100).toFixed(1)
+    : "0";
+
   const [activeTab, setActiveTab] = useState('analytics');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -304,7 +288,7 @@ export default function AdminLayout({
   const [selectedDownloadPatientId, setSelectedDownloadPatientId] = useState<string>(patients[0]?.id || '');
 
   // Sliced user engagement and activity metrics
-  const slicedData = ENGAGEMENT_DATA_30_DAYS.slice(-parseInt(timeRange));
+  const slicedData = engagementData.slice(-parseInt(timeRange));
   const totalActions = slicedData.reduce((acc, curr) => acc + curr.platformActions, 0);
   const peakUsers = Math.max(...slicedData.map(d => d.activeUsers), 0);
   const avgUsers = slicedData.length > 0 
@@ -1108,6 +1092,116 @@ export default function AdminLayout({
               </div>
             </div>
 
+            {/* Weekly Trend of Newly Escalated Complaints Line Chart Section */}
+            <div id="weekly-escalated-complaints-trend" className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-6">
+              <div>
+                <h4 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
+                  <ShieldAlert className="w-4.5 h-4.5 text-rose-500" />
+                  <span>Weekly Trend of Newly Escalated Complaints (Last 30 Days)</span>
+                </h4>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Rolling weekly analysis tracking the volume of newly escalated grievance reports, unresolved cases, and clinical response performance times.
+                </p>
+              </div>
+
+              {/* Weekly Mini Metrics Grid */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 bg-slate-50/50 dark:bg-slate-950/20 p-4 rounded-xl border border-slate-100 dark:border-slate-800/60">
+                <div className="space-y-1">
+                  <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Total Escalations</span>
+                  <p className="text-sm font-black text-slate-950 dark:text-white">{totalEscalations} cases</p>
+                  <span className="text-[9px] text-rose-500 font-semibold block">HIPAA & billing grievances</span>
+                </div>
+                <div className="space-y-1 border-l border-slate-200/60 dark:border-slate-800 pl-4">
+                  <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Resolved Escalations</span>
+                  <p className="text-sm font-black text-slate-950 dark:text-white">{resolvedEscalations} cases</p>
+                  <span className="text-[9px] text-green-500 font-semibold block">Average {resolutionRate}% resolution rate</span>
+                </div>
+                <div className="space-y-1 border-l border-slate-200/60 dark:border-slate-800 pl-4">
+                  <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Unresolved/Pending</span>
+                  <p className="text-sm font-black text-slate-950 dark:text-white">{unresolvedEscalations} cases</p>
+                  <span className="text-[9px] text-amber-500 font-semibold block">Under clinical review</span>
+                </div>
+                <div className="space-y-1 border-l border-slate-200/60 dark:border-slate-800 pl-4">
+                  <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Avg Response Time</span>
+                  <p className="text-sm font-black text-slate-950 dark:text-white">{avgResponseTime} hours</p>
+                  <span className="text-[9px] text-indigo-500 dark:text-indigo-400 font-semibold block">Real-time alerts triggered</span>
+                </div>
+              </div>
+
+              {/* Weekly Trend Recharts Line Chart */}
+              <div className="w-full h-[260px] md:h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={weeklyComplaints}
+                    margin={{ top: 15, right: 10, left: -20, bottom: 5 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.12)" />
+                    <XAxis 
+                      dataKey="week" 
+                      fontSize={9} 
+                      stroke="#94a3b8" 
+                      tickLine={false}
+                      axisLine={false} 
+                    />
+                    <YAxis 
+                      fontSize={9} 
+                      stroke="#94a3b8" 
+                      tickLine={false}
+                      axisLine={false} 
+                      yAxisId="left"
+                    />
+                    <YAxis 
+                      fontSize={9} 
+                      stroke="#94a3b8" 
+                      tickLine={false}
+                      axisLine={false} 
+                      yAxisId="right"
+                      orientation="right"
+                    />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Legend 
+                      verticalAlign="top" 
+                      height={36} 
+                      iconSize={8}
+                      iconType="circle"
+                      wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} 
+                    />
+                    <Line
+                      yAxisId="left"
+                      type="monotone"
+                      name="Escalated Complaints"
+                      dataKey="escalated"
+                      stroke="#ef4444"
+                      strokeWidth={2.5}
+                      dot={{ r: 4, strokeWidth: 1.5 }}
+                      activeDot={{ r: 6, strokeWidth: 0 }}
+                    />
+                    <Line
+                      yAxisId="left"
+                      type="monotone"
+                      name="Resolved Complaints"
+                      dataKey="resolved"
+                      stroke="#10b981"
+                      strokeWidth={2.5}
+                      dot={{ r: 4, strokeWidth: 1.5 }}
+                      activeDot={{ r: 6, strokeWidth: 0 }}
+                    />
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      name="Response Time (hrs)"
+                      dataKey="avgResponseHours"
+                      stroke="#8b5cf6"
+                      strokeWidth={2}
+                      strokeDasharray="5 5"
+                      dot={{ r: 3, strokeWidth: 1.5 }}
+                      activeDot={{ r: 5, strokeWidth: 0 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
             {/* Grid for Parameters Tuning and Patient/Provider Donuts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               
@@ -1220,6 +1314,191 @@ export default function AdminLayout({
                 </div>
               </div>
 
+            </div>
+
+            {/* 🛠️ Live Telemetry & Database Management */}
+            <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+                <div>
+                  <h4 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
+                    <Database className="w-4.5 h-4.5 text-indigo-600 dark:text-indigo-400" />
+                    <span>Real-Time Database Telemetry Controls</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Directly modify live complaints and user engagement parameters in the PostgreSQL database.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const defaults = [
+                        { week: 'W1 (May 10-16)', escalated: 3, resolved: 2, avgResponseHours: 4.2 },
+                        { week: 'W2 (May 17-23)', escalated: 7, resolved: 4, avgResponseHours: 3.5 },
+                        { week: 'W3 (May 24-30)', escalated: 12, resolved: 9, avgResponseHours: 2.8 },
+                        { week: 'W4 (May 31-Jun 08)', escalated: 8, resolved: 7, avgResponseHours: 1.9 }
+                      ];
+                      onUpdateWeeklyComplaints(defaults);
+                      onTriggerToast('Reset complaints database rows successfully!', 'success');
+                    }}
+                    className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-750 dark:text-slate-350 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer"
+                    title="Reset to initial seed records"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Reset Database</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Weekly complaints database adjustments */}
+                <div className="space-y-4">
+                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block">Grievance & Escalation Sliders</span>
+                  <div className="space-y-3.5 bg-slate-50 dark:bg-slate-950/20 p-4 rounded-xl border border-slate-150 dark:border-slate-800">
+                    {weeklyComplaints.map((item, index) => (
+                      <div key={index} className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">{item.week}</span>
+                          <span className="text-[10px] font-mono text-slate-400">Response: {item.avgResponseHours}h</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-[9px] text-slate-400 font-bold uppercase block mb-1">Escalated: {item.escalated}</label>
+                            <input
+                              type="range"
+                              min="0"
+                              max="30"
+                              value={item.escalated}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                const updated = [...weeklyComplaints];
+                                updated[index] = { ...item, escalated: val };
+                                onUpdateWeeklyComplaints(updated);
+                              }}
+                              className="w-full h-1 bg-slate-250 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-650"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] text-slate-400 font-bold uppercase block mb-1">Resolved: {item.resolved}</label>
+                            <input
+                              type="range"
+                              min="0"
+                              max="30"
+                              value={item.resolved}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                const updated = [...weeklyComplaints];
+                                updated[index] = { ...item, resolved: val };
+                                onUpdateWeeklyComplaints(updated);
+                              }}
+                              className="w-full h-1 bg-slate-250 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-550"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Add new week button */}
+                    <button
+                      onClick={() => {
+                        const nextNum = weeklyComplaints.length + 1;
+                        const newWeek: WeeklyComplaint = {
+                          week: `W${nextNum} (Rolling Analysis)`,
+                          escalated: Math.floor(Math.random() * 10) + 2,
+                          resolved: Math.floor(Math.random() * 8) + 1,
+                          avgResponseHours: parseFloat((Math.random() * 3 + 1.5).toFixed(1))
+                        };
+                        onUpdateWeeklyComplaints(prev => [...prev, newWeek]);
+                        onTriggerToast(`Appended new week W${nextNum} complaints record into Database!`, 'success');
+                      }}
+                      className="w-full py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-950 text-indigo-600 dark:text-indigo-400 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Log New Complaints Week</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Engagement telemetry adjustments */}
+                <div className="space-y-4">
+                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">Traffic & Engagement Telemetry</span>
+                  <div className="space-y-4 bg-slate-50 dark:bg-slate-950/20 p-4 rounded-xl border border-slate-150 dark:border-slate-800">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Live Traffic Control (Last Entry)</span>
+                        <span className="text-[10px] bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-full font-mono font-bold">
+                          {engagementData[engagementData.length - 1]?.date || 'N/A'}
+                        </span>
+                      </div>
+                      
+                      {engagementData.length > 0 && (
+                        <div className="space-y-3">
+                          <div>
+                            <div className="flex justify-between text-[10px] font-bold text-slate-400 mb-1">
+                              <span>ACTIVE PORTAL USERS</span>
+                              <span>{engagementData[engagementData.length - 1].activeUsers} Users</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="10"
+                              max="150"
+                              value={engagementData[engagementData.length - 1].activeUsers}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                const updated = [...engagementData];
+                                updated[updated.length - 1] = { ...updated[updated.length - 1], activeUsers: val };
+                                onUpdateEngagementData(updated);
+                              }}
+                              className="w-full h-1 bg-slate-250 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-550"
+                            />
+                          </div>
+
+                          <div>
+                            <div className="flex justify-between text-[10px] font-bold text-slate-400 mb-1">
+                              <span>SECURE PLATFORM ACTIONS</span>
+                              <span>{engagementData[engagementData.length - 1].platformActions} Actions</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="50"
+                              max="1000"
+                              value={engagementData[engagementData.length - 1].platformActions}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                const updated = [...engagementData];
+                                updated[updated.length - 1] = { ...updated[updated.length - 1], platformActions: val };
+                                onUpdateEngagementData(updated);
+                              }}
+                              className="w-full h-1 bg-slate-250 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-650"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Inject daily traffic mock */}
+                    <button
+                      onClick={() => {
+                        const lastEntry = engagementData[engagementData.length - 1];
+                        const dateParts = lastEntry ? lastEntry.date.split(' ') : ['Jun', '08'];
+                        const nextDay = lastEntry ? parseInt(dateParts[1]) + 1 : 9;
+                        const dateStr = `${dateParts[0]} ${nextDay < 10 ? '0' + nextDay : nextDay}`;
+                        
+                        const newTraffic: EngagementDataPoint = {
+                          date: dateStr,
+                          activeUsers: Math.floor(Math.random() * 40) + 40,
+                          platformActions: Math.floor(Math.random() * 300) + 400
+                        };
+                        onUpdateEngagementData(prev => [...prev, newTraffic]);
+                        onTriggerToast(`Injected dynamic database record for ${dateStr}!`, 'success');
+                      }}
+                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Inject Next Day's Traffic</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Real-Time Biometric Clinical Alert Logs Section */}
@@ -2672,19 +2951,19 @@ export default function AdminLayout({
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-slate-50 dark:bg-slate-950/20 p-3 rounded-xl border border-slate-200/50 dark:border-slate-800/60 text-left">
                     <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider block">Total Logged</span>
-                    <span className="font-mono text-lg font-bold text-slate-800 dark:text-white">35 cases</span>
+                    <span className="font-mono text-lg font-bold text-slate-800 dark:text-white">{totalEscalations + resolvedEscalations} cases</span>
                   </div>
                   <div className="bg-amber-50/45 dark:bg-amber-950/10 p-3 rounded-xl border border-amber-200/40 dark:border-amber-900/20 text-left">
                     <span className="text-[8px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider block">Pending</span>
-                    <span className="font-mono text-lg font-bold text-amber-700 dark:text-amber-300">24 cases</span>
+                    <span className="font-mono text-lg font-bold text-amber-700 dark:text-amber-300">{unresolvedEscalations} cases</span>
                   </div>
                   <div className="bg-rose-50/45 dark:bg-rose-950/10 p-3 rounded-xl border border-rose-200/40 dark:border-rose-900/20 text-left">
                     <span className="text-[8px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider block">Escalated</span>
-                    <span className="font-mono text-lg font-bold text-rose-750 dark:text-rose-300">11 cases</span>
+                    <span className="font-mono text-lg font-bold text-rose-750 dark:text-rose-300">{totalEscalations} cases</span>
                   </div>
                   <div className="bg-emerald-50/45 dark:bg-emerald-950/10 p-3 rounded-xl border border-emerald-200/40 dark:border-emerald-900/20 text-left">
                     <span className="text-[8px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">Resolved</span>
-                    <span className="font-mono text-lg font-bold text-emerald-700 dark:text-emerald-300">78%</span>
+                    <span className="font-mono text-lg font-bold text-emerald-700 dark:text-emerald-300">{resolutionRate}%</span>
                   </div>
                 </div>
 
@@ -2692,20 +2971,29 @@ export default function AdminLayout({
                 <div className="bg-slate-50 dark:bg-slate-950/20 p-4 rounded-xl border border-slate-200/50 dark:border-slate-800/60 space-y-3">
                   <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Critical Escalated Alerts</span>
                   <div className="space-y-2 text-[11px]">
-                    <div className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/80 rounded-lg flex items-start gap-2 text-left">
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0 mt-1.5 animate-pulse" />
-                      <div>
-                        <p className="font-bold text-slate-800 dark:text-slate-200 leading-tight">Pre-natal BP chart failure</p>
-                        <p className="text-[9px] text-slate-400 mt-0.5">Clinical Quality · Escalated 2h ago</p>
-                      </div>
-                    </div>
-                    <div className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/80 rounded-lg flex items-start gap-2 text-left">
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0 mt-1.5 animate-pulse" />
-                      <div>
-                        <p className="font-bold text-slate-800 dark:text-slate-200 leading-tight">Disputed copay billing charge</p>
-                        <p className="text-[9px] text-slate-400 mt-0.5">Billing & Insurance · Escalated 5h ago</p>
-                      </div>
-                    </div>
+                    {totalEscalations === 0 ? (
+                      <p className="text-xs text-slate-500 py-4 text-center dark:text-slate-400">No active critical escalated alerts. System healthy.</p>
+                    ) : (
+                      (() => {
+                        const alertsTemplates = [
+                          { title: "Pre-natal BP chart failure", category: "Clinical Quality", age: "2h ago" },
+                          { title: "Disputed copay billing charge", category: "Billing & Insurance", age: "5h ago" },
+                          { title: "Somatic ECG synchronizer lag", category: "Clinical Quality", age: "12h ago" },
+                          { title: "Fasting glucose telemetry drop", category: "Technical Support", age: "1d ago" },
+                          { title: "Maternity ward check-in delay", category: "Waiting Times", age: "2d ago" }
+                        ];
+                        const countToShow = Math.max(1, Math.min(totalEscalations, alertsTemplates.length));
+                        return alertsTemplates.slice(0, countToShow).map((alert, idx) => (
+                          <div key={idx} className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/80 rounded-lg flex items-start gap-2 text-left animate-pulse">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0 mt-1.5" />
+                            <div>
+                              <p className="font-bold text-slate-800 dark:text-slate-200 leading-tight">{alert.title}</p>
+                              <p className="text-[9px] text-slate-400 mt-0.5">{alert.category} · Escalated {alert.age}</p>
+                            </div>
+                          </div>
+                        ));
+                      })()
+                    )}
                   </div>
                 </div>
               </div>
@@ -2720,13 +3008,20 @@ export default function AdminLayout({
                 <div className="bg-slate-50 dark:bg-slate-950/25 border border-slate-150 dark:border-slate-800/80 p-4 rounded-xl">
                   <div className="h-[270px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={[
-                        { name: 'Clinical Quality', pending: 5, escalated: 2 },
-                        { name: 'Billing/Insurance', pending: 8, escalated: 4 },
-                        { name: 'Technical Support', pending: 3, escalated: 1 },
-                        { name: 'Waiting Times', pending: 6, escalated: 3 },
-                        { name: 'Staff Behavior', pending: 2, escalated: 1 },
-                      ]} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <BarChart data={(() => {
+                        const categories = [
+                          { name: 'Clinical Quality', pendingRatio: 0.21, escalatedRatio: 0.18 },
+                          { name: 'Billing/Insurance', pendingRatio: 0.33, escalatedRatio: 0.36 },
+                          { name: 'Technical Support', pendingRatio: 0.13, escalatedRatio: 0.09 },
+                          { name: 'Waiting Times', pendingRatio: 0.25, escalatedRatio: 0.27 },
+                          { name: 'Staff Behavior', pendingRatio: 0.08, escalatedRatio: 0.10 }
+                        ];
+                        return categories.map(cat => ({
+                          name: cat.name,
+                          pending: Math.max(0, Math.round(unresolvedEscalations * cat.pendingRatio)),
+                          escalated: Math.max(0, Math.round(totalEscalations * cat.escalatedRatio))
+                        }));
+                      })()} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
                         <XAxis dataKey="name" stroke="#64748B" fontSize={9} tickLine={false} />
                         <YAxis stroke="#64748B" fontSize={9} tickLine={false} />
@@ -2737,6 +3032,91 @@ export default function AdminLayout({
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Weekly Trend of Newly Escalated Complaints Line Chart */}
+            <div className="border-t border-slate-150 dark:border-slate-800/80 pt-6 mt-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Weekly Escalations Trend (30 Days)</span>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Rolling line analysis of weekly escalations and resolution trends</p>
+                </div>
+                <span className="text-[9px] text-rose-500 font-bold font-mono uppercase">Escalations Telemetry</span>
+              </div>
+              
+              <div className="bg-slate-50 dark:bg-slate-950/25 border border-slate-150 dark:border-slate-800/80 p-4 rounded-xl">
+                <div className="h-[270px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={weeklyComplaints}
+                      margin={{ top: 15, right: 10, left: -20, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.12)" />
+                      <XAxis 
+                        dataKey="week" 
+                        fontSize={9} 
+                        stroke="#94a3b8" 
+                        tickLine={false}
+                        axisLine={false} 
+                      />
+                      <YAxis 
+                        fontSize={9} 
+                        stroke="#94a3b8" 
+                        tickLine={false}
+                        axisLine={false} 
+                        yAxisId="left"
+                      />
+                      <YAxis 
+                        fontSize={9} 
+                        stroke="#94a3b8" 
+                        tickLine={false}
+                        axisLine={false} 
+                        yAxisId="right"
+                        orientation="right"
+                      />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend 
+                        verticalAlign="top" 
+                        height={36} 
+                        iconSize={8}
+                        iconType="circle"
+                        wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} 
+                      />
+                      <Line
+                        yAxisId="left"
+                        type="monotone"
+                        name="Escalated Complaints"
+                        dataKey="escalated"
+                        stroke="#ef4444"
+                        strokeWidth={2.5}
+                        dot={{ r: 4, strokeWidth: 1.5 }}
+                        activeDot={{ r: 6, strokeWidth: 0 }}
+                      />
+                      <Line
+                        yAxisId="left"
+                        type="monotone"
+                        name="Resolved Complaints"
+                        dataKey="resolved"
+                        stroke="#10b981"
+                        strokeWidth={2.5}
+                        dot={{ r: 4, strokeWidth: 1.5 }}
+                        activeDot={{ r: 6, strokeWidth: 0 }}
+                      />
+                      <Line
+                        yAxisId="right"
+                        type="monotone"
+                        name="Response Time (hrs)"
+                        dataKey="avgResponseHours"
+                        stroke="#8b5cf6"
+                        strokeWidth={2}
+                        strokeDasharray="5 5"
+                        dot={{ r: 3, strokeWidth: 1.5 }}
+                        activeDot={{ r: 5, strokeWidth: 0 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
             </div>
@@ -3003,6 +3383,66 @@ export default function AdminLayout({
                       </div>
                     );
                   })()}
+
+                  {/* System Audit & Session Metrics */}
+                  <div className="pt-2.5 border-t border-slate-200 dark:border-slate-800 text-[10px] space-y-1.5 text-slate-500 dark:text-slate-400">
+                    <p className="font-bold text-slate-400 uppercase tracking-wider text-[8.5px] font-mono mb-1">Session & Telemetry Audit</p>
+                    <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-950/20 p-2 rounded-lg border border-slate-100 dark:border-slate-800/50">
+                      <span>Last Login Session:</span>
+                      <span className={`font-mono font-bold ${loggedInUserIds.includes(selectedProfileUser.id) ? 'text-green-500' : 'text-slate-700 dark:text-slate-300'}`}>
+                        {(() => {
+                          const isOnline = loggedInUserIds.includes(selectedProfileUser.id);
+                          const loginLogs = auditLogs.filter(a => a.userId === selectedProfileUser.id && (a.action === 'Authorized Authentication' || a.action.toLowerCase().includes('login')));
+                          const lastLoginLog = loginLogs.length > 0 ? loginLogs[0] : null;
+                          if (isOnline) return "🟢 Online Now";
+                          return lastLoginLog ? lastLoginLog.timestamp : "No recorded sessions";
+                        })()}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-950/20 p-2 rounded-lg border border-slate-100 dark:border-slate-800/50">
+                      <span>Last Recorded Entry:</span>
+                      <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
+                        {(() => {
+                          const pLogs = logs.filter(l => l.patientId === selectedProfileUser.id);
+                          const pAhomka = (ahomkaEntries || []).filter(e => e.patientId === selectedProfileUser.id);
+                          const allRecordings: { desc: string; timestamp: string }[] = [];
+                          
+                          pLogs.forEach(l => {
+                            allRecordings.push({
+                              desc: `${l.metric} (${l.value})`,
+                              timestamp: l.timestamp
+                            });
+                          });
+                          
+                          pAhomka.forEach(e => {
+                            if (e.systolic !== undefined && e.diastolic !== undefined) {
+                              allRecordings.push({
+                                desc: `Ahomka BP (${e.systolic}/${e.diastolic})`,
+                                timestamp: e.timestamp
+                              });
+                            } else {
+                              allRecordings.push({
+                                desc: `Ahomka Mood (${e.mood}/10)`,
+                                timestamp: e.timestamp
+                              });
+                            }
+                          });
+
+                          const safeParseDate = (ts: string) => {
+                            if (!ts) return 0;
+                            if (ts.startsWith('Today')) return Date.now();
+                            const parsed = Date.parse(ts);
+                            return isNaN(parsed) ? 0 : parsed;
+                          };
+
+                          allRecordings.sort((a, b) => safeParseDate(b.timestamp) - safeParseDate(a.timestamp));
+                          return allRecordings.length > 0 
+                            ? `${allRecordings[0].desc} @ ${allRecordings[0].timestamp}` 
+                            : "No telemetry recorded";
+                        })()}
+                      </span>
+                    </div>
+                  </div>
                   </div>
 
                   {/* Operational Controls status */}

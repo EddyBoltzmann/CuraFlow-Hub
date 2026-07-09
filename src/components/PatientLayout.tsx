@@ -87,6 +87,12 @@ export default function PatientLayout({
   // Confirmation state for deleting health logs
   const [logIdToDelete, setLogIdToDelete] = useState<string | null>(null);
   
+  // Selected Ahomka entry for full details view modal popup
+  const [selectedAhomkaEntry, setSelectedAhomkaEntry] = useState<AhomkaEntry | null>(null);
+
+  // Selected Care Provider for profile details view modal popup
+  const [selectedDetailProvider, setSelectedDetailProvider] = useState<ProviderInfo | null>(null);
+  
   // Local state for interactive logger
   const [logMetric, setLogMetric] = useState<'Blood Pressure' | 'Blood Glucose' | 'Active Calories' | 'Sleep Quality' | 'Weight' | 'Heart Rate'>('Blood Pressure');
   const [logValue, setLogValue] = useState('');
@@ -668,7 +674,7 @@ export default function PatientLayout({
           fakeResult += "### 📋 General Diagnostic Telemetry\n";
           fakeResult += "- **Observations**: Logged report data evaluated.\n";
           fakeResult += "- **Baseline Analysis**: Primary indices reflect stable clinical margins, but some metrics invite adjustments.\n";
-          fakeResult += "- **Action Plan**: Daily log trackings across sleep and blood pressure on the Health Tracker Logs pane. Consult Dr. Jenkins during your next consultation slot.";
+          fakeResult += "- **Action Plan**: Daily log trackings across sleep and blood pressure on the Health Tracker Logs pane. Consult your clinical provider during your next consultation slot.";
         }
         
         setSummarizerResult(fakeResult);
@@ -1109,7 +1115,7 @@ export default function PatientLayout({
               <div className="relative">
                 <span className="bg-indigo-500 text-[10px] font-bold px-2.5 py-1 rounded-full text-white uppercase tracking-wider">Patient Portal</span>
                 <h2 className="font-display text-xl font-bold mt-3 leading-tight">Welcome to your secure health desk, {session.name}</h2>
-                <p className="text-xs text-indigo-200 mt-1 max-w-lg">Monitor critical trends, direct message Dr. Jenkins in real time, and audit educational journals HIPAA-securely.</p>
+                <p className="text-xs text-indigo-200 mt-1 max-w-lg">Monitor critical trends, direct message your care providers in real time, and audit educational journals HIPAA-securely.</p>
               </div>
             </div>
 
@@ -1363,7 +1369,37 @@ export default function PatientLayout({
                     <p className="text-[9px] text-slate-400 mt-1">{selectedConv.specialty}</p>
                   </div>
                 </div>
-                <div className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 font-bold">Encrypted Connection</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    id="view-provider-details-btn"
+                    onClick={() => {
+                      const matchedProv = providers.find(p => p.name === selectedConv.name || p.id === selectedConv.id);
+                      if (matchedProv) {
+                        setSelectedDetailProvider(matchedProv);
+                      } else {
+                        // Fallback provider info for the selected conversation doctor if not fully provisioned yet
+                        const fallbackProv: ProviderInfo = {
+                          id: 'default-fallback-prov',
+                          name: selectedConv.name,
+                          specialty: selectedConv.specialty,
+                          avatar: selectedConv.avatar,
+                          location: 'Cantonments, Accra',
+                          rating: 4.8,
+                          hospital: 'Korle-Bu Teaching Hospital (KBTH)',
+                          fee: 'GH₵ 150',
+                          slots: ['09:00 AM', '11:00 AM', '02:00 PM', '04:00 PM']
+                        };
+                        setSelectedDetailProvider(fallbackProv);
+                      }
+                    }}
+                    className="p-1 px-2.5 bg-indigo-50 dark:bg-slate-800 border hover:bg-indigo-100 dark:hover:bg-slate-700 border-indigo-100 dark:border-slate-700 rounded-lg text-[9px] font-bold text-indigo-700 dark:text-indigo-400 transition flex items-center gap-1 cursor-pointer"
+                  >
+                    <Stethoscope className="w-2.5 h-2.5" />
+                    <span>View Provider Profile</span>
+                  </button>
+                  <div className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 font-bold">Encrypted Connection</div>
+                </div>
               </div>
 
               {/* Message balloons list */}
@@ -2194,9 +2230,9 @@ export default function PatientLayout({
                             {e.readings && e.readings.length > 0 && (
                               <button 
                                 onClick={() => {
-                                  onTriggerToast(`Readings logged: ${e.readings?.map(r => `${r.systolic}/${r.diastolic} (P:${r.pulse})`).join(' | ')}`);
+                                  setSelectedAhomkaEntry(e);
                                 }}
-                                className="p-1 px-2.5 bg-slate-100 border hover:bg-slate-200 rounded text-[9px] font-bold transition flex items-center gap-1 cursor-pointer"
+                                className="p-1 px-2.5 bg-slate-100 dark:bg-slate-800 border hover:bg-slate-200 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700 rounded text-[9px] font-bold text-slate-800 dark:text-slate-200 transition flex items-center gap-1 cursor-pointer"
                               >
                                 View Details ({e.readings.length})
                               </button>
@@ -2885,7 +2921,7 @@ export default function PatientLayout({
                       {vitalsSuccessSummary.systolic < 120 && vitalsSuccessSummary.diastolic < 80 ? (
                         "Your blood pressure is within the normal range. Thanks. Keep maintaining active sorghum flours, steady hydration, and compliance check-ins!"
                       ) : vitalsSuccessSummary.systolic >= 140 || vitalsSuccessSummary.diastolic >= 90 ? (
-                        "Your averaged parameters indicate a high-risk hypertension Stage 2 threshold. We suggest reviewing these logs with Dr. Jenkins via the Providers chat tab and avoiding sudden physical stresses."
+                        "Your averaged parameters indicate a high-risk hypertension Stage 2 threshold. We suggest reviewing these logs with your care provider via the Providers chat tab and avoiding sudden physical stresses."
                       ) : (
                         "Your averaged elements represent mildly elevated pre-hypertension tendencies. Rest comfortably, maintain steady herbal Bissap tea limits, and check again tomorrow."
                       )}
@@ -3150,6 +3186,292 @@ export default function PatientLayout({
                 Yes, Delete Log
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* AHOMKA HO ENTRY FULL DETAILS MODAL POPUP */}
+      {selectedAhomkaEntry && (
+        <div id="ahomka-details-modal" className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-150 dark:border-slate-800 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-xl">
+                  <Activity className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-slate-900 dark:text-white">Ahomka Ho Vitals Detail</h4>
+                  <p className="text-[10px] text-slate-400 font-mono font-medium">{selectedAhomkaEntry.timestamp}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedAhomkaEntry(null)}
+                className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg transition-colors cursor-pointer"
+                title="Close popup"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Scrollable Content */}
+            <div className="flex-1 overflow-y-auto overflow-x-hidden py-5 space-y-5 pr-1 font-sans text-xs">
+              
+              {/* Vitals Summary Row */}
+              <div className="grid grid-cols-3 gap-3 bg-slate-50 dark:bg-slate-950/20 p-3 rounded-xl border border-slate-100 dark:border-slate-800/60">
+                <div className="text-center p-1">
+                  <span className="text-[9px] uppercase font-bold text-slate-400 font-mono block mb-1">Systolic BP</span>
+                  <div className="flex items-baseline justify-center gap-0.5">
+                    <span className="text-lg font-black text-slate-950 dark:text-white">{selectedAhomkaEntry.systolic || '--'}</span>
+                    <span className="text-[9px] text-slate-400">mmHg</span>
+                  </div>
+                </div>
+                <div className="text-center p-1 border-x border-slate-200 dark:border-slate-800">
+                  <span className="text-[9px] uppercase font-bold text-slate-400 font-mono block mb-1">Diastolic BP</span>
+                  <div className="flex items-baseline justify-center gap-0.5">
+                    <span className="text-lg font-black text-slate-950 dark:text-white">{selectedAhomkaEntry.diastolic || '--'}</span>
+                    <span className="text-[9px] text-slate-400">mmHg</span>
+                  </div>
+                </div>
+                <div className="text-center p-1">
+                  <span className="text-[9px] uppercase font-bold text-indigo-500 font-mono block mb-1">Rest Pulse</span>
+                  <div className="flex items-baseline justify-center gap-0.5">
+                    <span className="text-lg font-black text-indigo-600 dark:text-indigo-400">{selectedAhomkaEntry.pulse || '--'}</span>
+                    <span className="text-[9px] text-indigo-400">bpm</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Three readings sequence breakdown */}
+              {selectedAhomkaEntry.readings && selectedAhomkaEntry.readings.length > 0 && (
+                <div className="space-y-2">
+                  <h5 className="font-bold text-[10px] uppercase text-slate-400 tracking-wider font-mono">Sequential Readings Breakdown</h5>
+                  <div className="grid grid-cols-3 gap-2">
+                    {selectedAhomkaEntry.readings.map((reading, idx) => (
+                      <div key={idx} className="bg-white dark:bg-slate-800 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700/80 text-center relative">
+                        <span className="absolute top-1 left-1.5 text-[8px] font-bold text-slate-300 dark:text-slate-600">#{idx + 1}</span>
+                        <div className="font-bold text-xs text-slate-900 dark:text-white mt-1">
+                          {reading.systolic}/{reading.diastolic}
+                        </div>
+                        <div className="text-[9px] text-slate-400 mt-0.5">Pulse: {reading.pulse} bpm</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Physical Symptoms */}
+              <div className="space-y-1.5">
+                <h5 className="font-bold text-[10px] uppercase text-slate-400 tracking-wider font-mono">Registered Symptoms</h5>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedAhomkaEntry.symptoms && selectedAhomkaEntry.symptoms.length > 0 ? (
+                    selectedAhomkaEntry.symptoms.map(s => (
+                      <span key={s} className="px-2.5 py-1 bg-red-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-400 font-bold rounded-lg text-[9.5px]">
+                        ⚠️ {s}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-slate-400 italic text-[10.5px]">No somatic symptoms registered.</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Patient Well-being Indices */}
+              <div className="space-y-2.5">
+                <h5 className="font-bold text-[10px] uppercase text-slate-400 tracking-wider font-mono">Wellness & Perceived Stress Indices</h5>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="bg-slate-50 dark:bg-slate-950/10 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800/60 flex items-center justify-between min-w-0">
+                    <div className="min-w-0">
+                      <span className="text-[9px] text-slate-400 block font-semibold">Mood Score</span>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{selectedAhomkaEntry.mood}/10</span>
+                    </div>
+                    <div className="w-8 h-8 rounded-full bg-amber-50 dark:bg-amber-950/30 flex items-center justify-center text-xs shrink-0">
+                      {selectedAhomkaEntry.mood >= 8 ? '😊' : selectedAhomkaEntry.mood >= 5 ? '😐' : '😞'}
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 dark:bg-slate-950/10 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800/60 flex items-center justify-between min-w-0">
+                    <div className="min-w-0">
+                      <span className="text-[9px] text-slate-400 block font-semibold">Perceived Stress</span>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{selectedAhomkaEntry.stress}/10</span>
+                    </div>
+                    <div className="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-950/30 flex items-center justify-center text-xs shrink-0">
+                      🧠
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 dark:bg-slate-950/10 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800/60 flex items-center justify-between sm:col-span-2 min-w-0">
+                    <div className="min-w-0 flex-1">
+                      <span className="text-[9px] text-slate-400 block font-semibold">Comfort Standing</span>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block break-words whitespace-normal mt-0.5 leading-snug">
+                        {selectedAhomkaEntry.feeling || 'N/A'}
+                      </span>
+                    </div>
+                    <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/30 flex items-center justify-center text-xs shrink-0 ml-3">
+                      🌿
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 dark:bg-slate-950/10 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800/60 flex items-center justify-between sm:col-span-2 min-w-0">
+                    <div className="min-w-0 flex-1">
+                      <span className="text-[9px] text-slate-400 block font-semibold">Medication Adherence</span>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block break-words whitespace-normal mt-0.5 leading-snug">
+                        {selectedAhomkaEntry.medicationAdherence || 'Yes, fully compliant'}
+                      </span>
+                    </div>
+                    <div className="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-950/30 flex items-center justify-center text-xs shrink-0 ml-3">
+                      💊
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Patient Notes & Self-Annotations */}
+              {selectedAhomkaEntry.notes && (
+                <div className="space-y-1.5">
+                  <h5 className="font-bold text-[10px] uppercase text-slate-400 tracking-wider font-mono">Patient Self-Annotations</h5>
+                  <div className="p-3 bg-indigo-50/40 dark:bg-indigo-950/15 text-slate-700 dark:text-slate-300 font-medium italic rounded-xl border border-indigo-100/60 dark:border-indigo-900/40 leading-relaxed">
+                    "{selectedAhomkaEntry.notes}"
+                  </div>
+                </div>
+              )}
+
+              {/* HIPAA Secure Seal */}
+              <div className="flex items-center gap-2 bg-emerald-50/50 dark:bg-emerald-950/10 p-3 rounded-xl border border-emerald-100/50 dark:border-emerald-900/20 text-[10px] text-emerald-700 dark:text-emerald-400">
+                <ShieldCheck className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <span className="font-semibold">This telemetry data is HIPAA-securely sealed, cryptographically verified, and fully integrated with your health provider profile.</span>
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-4 border-t border-slate-150 dark:border-slate-800 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setSelectedAhomkaEntry(null)}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition text-[11px] cursor-pointer"
+              >
+                Close details view
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+      {/* Selected Care Provider Profile Details Modal Popup */}
+      {selectedDetailProvider && (
+        <div id="provider-details-dialog" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl relative animate-fade-in text-slate-900 dark:text-slate-100">
+            
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                  <Stethoscope className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm text-slate-900 dark:text-white leading-tight">Clinical Provider Directory</h3>
+                  <p className="text-[10px] text-slate-400 font-medium mt-0.5">Verified Medical Practitioner Profile details</p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setSelectedDetailProvider(null)} 
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                title="Close modal"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6 overflow-y-auto space-y-6 font-sans">
+              
+              {/* Profile Card Section */}
+              <div className="flex flex-col sm:flex-row items-center gap-4 bg-indigo-50/30 dark:bg-indigo-950/10 p-4 rounded-2xl border border-indigo-100/50 dark:border-indigo-900/30">
+                <img 
+                  src={selectedDetailProvider.avatar} 
+                  alt={selectedDetailProvider.name} 
+                  className="w-16 h-16 rounded-full object-cover border-2 border-indigo-200 dark:border-indigo-800 shrink-0" 
+                  referrerPolicy="no-referrer"
+                />
+                <div className="text-center sm:text-left space-y-1">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-1.5">
+                    <h4 className="font-black text-base text-slate-900 dark:text-white leading-none">{selectedDetailProvider.name}</h4>
+                    <span className="inline-flex self-center sm:self-auto items-center gap-1 text-[9px] px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 font-extrabold rounded-full font-mono">
+                      <Check className="w-2.5 h-2.5" />
+                      VERIFIED
+                    </span>
+                  </div>
+                  <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400">{selectedDetailProvider.specialty}</p>
+                  <p className="text-[10px] text-slate-400 font-semibold flex items-center justify-center sm:justify-start gap-1">
+                    <span>★ Rating: {selectedDetailProvider.rating || '4.8'}</span>
+                    <span className="text-slate-300 dark:text-slate-700">|</span>
+                    <span>Consultation copay: {selectedDetailProvider.fee || 'GH₵ 150'}</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Practice Location & Facility */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="p-3.5 bg-slate-50 dark:bg-slate-950/20 border border-slate-150 dark:border-slate-800 rounded-xl space-y-1">
+                  <span className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Affiliated Medical Facility</span>
+                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{selectedDetailProvider.hospital || 'Korle-Bu Teaching Hospital (KBTH)'}</p>
+                </div>
+
+                <div className="p-3.5 bg-slate-50 dark:bg-slate-950/20 border border-slate-150 dark:border-slate-800 rounded-xl space-y-1">
+                  <span className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">City / Location</span>
+                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{selectedDetailProvider.location || 'Accra, Greater Accra'}</p>
+                </div>
+              </div>
+
+              {/* Consultation Slots */}
+              <div className="space-y-2">
+                <span className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Daily Availability Hours</span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {(selectedDetailProvider.slots && selectedDetailProvider.slots.length > 0) ? (
+                    selectedDetailProvider.slots.map(s => (
+                      <div 
+                        key={s} 
+                        className="py-1.5 px-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-[10px] font-semibold text-center font-mono shadow-xs"
+                      >
+                        {s}
+                      </div>
+                    ))
+                  ) : (
+                    ['09:00 AM', '11:00 AM', '02:00 PM', '04:00 PM'].map(s => (
+                      <div 
+                        key={s} 
+                        className="py-1.5 px-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-lg text-[10px] font-semibold text-center font-mono shadow-xs"
+                      >
+                        {s}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Security seal */}
+              <div className="flex items-center gap-2.5 bg-indigo-50/40 dark:bg-indigo-950/15 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-900/30 text-[10px] text-slate-600 dark:text-slate-300 leading-normal">
+                <ShieldCheck className="w-4 h-4 shrink-0 text-emerald-600" />
+                <span>This medical provider is a board-certified clinical specialist registered under HIPAA data protection governance. Direct secure message loops are end-to-end encrypted.</span>
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setSelectedDetailProvider(null)}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition text-[11px] cursor-pointer shadow-lg shadow-indigo-600/10"
+              >
+                Close Profile
+              </button>
+            </div>
+
           </div>
         </div>
       )}

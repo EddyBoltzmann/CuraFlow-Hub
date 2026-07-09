@@ -26,11 +26,14 @@ interface ProviderLayoutProps {
   isAiTyping: boolean;
   onTriggerToast: (msg: string, type?: 'success' | 'info' | 'error') => void;
   onChangeLogAlertStatus: (id: string, isHighRisk: boolean) => void;
+  auditLogs?: AuditLog[];
+  loggedInUserIds?: string[];
 }
 
 export default function ProviderLayout({
   session, logs, conversations, aiChat, users,
-  onSendMessage, onSendAIChat, isAiTyping, onTriggerToast, onChangeLogAlertStatus
+  onSendMessage, onSendAIChat, isAiTyping, onTriggerToast, onChangeLogAlertStatus,
+  auditLogs = [], loggedInUserIds = []
 }: ProviderLayoutProps) {
   
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -101,7 +104,7 @@ export default function ProviderLayout({
   };
 
   const handleApplyClinicalVerification = (logId: string) => {
-    onTriggerToast(`Biometric log #${logId} marked as clinically verified by Dr. Jenkins!`, 'success');
+    onTriggerToast(`Biometric log #${logId} marked as clinically verified by ${session.name}!`, 'success');
   };
 
   const defaultPatientMock = {
@@ -117,6 +120,13 @@ export default function ProviderLayout({
   };
 
   const selectedPatientData = users.find(u => u.id === selectedPatId) || defaultPatient || defaultPatientMock;
+
+  // Derived active patient session status and last telemetry recording details
+  const isOnline = loggedInUserIds.includes(selectedPatientData.id);
+  const patientLogs = logs.filter(l => l.patientId === selectedPatientData.id || (!l.patientId && selectedPatientData.id === 'usr-1'));
+  const latestLog = patientLogs.length > 0 ? patientLogs[0] : null;
+  const loginLogs = auditLogs.filter(a => a.userId === selectedPatientData.id && (a.action === 'Authorized Authentication' || a.action.toLowerCase().includes('login')));
+  const lastLoginLog = loginLogs.length > 0 ? loginLogs[0] : null;
 
   // Dynamically derive critical alert condition logs
   const criticalNotifications = logs
@@ -461,6 +471,41 @@ export default function ProviderLayout({
                 <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase text-right leading-relaxed">
                   <p>Insur: {selectedPatientData.insuranceProvider || 'N/A'}</p>
                   <p className="text-[9px] lowercase opacity-75">{selectedPatientData.insuranceMemberId ? `Member ID: ${selectedPatientData.insuranceMemberId}` : 'No insurance mapped'}</p>
+                </div>
+              </div>
+
+              {/* Session & Telemetry Quick Audit */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 dark:bg-slate-950/20 p-3.5 rounded-xl border border-slate-150 dark:border-slate-800 text-xs">
+                <div className="space-y-1">
+                  <span className="text-[9px] uppercase font-bold text-slate-400 font-mono block">Patient Session Status</span>
+                  <div className="flex items-center gap-1.5 font-bold">
+                    {isOnline ? (
+                      <>
+                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse shrink-0"></span>
+                        <span className="text-green-600 dark:text-emerald-400 text-[11px]">Online Now / Active Session</span>
+                      </>
+                    ) : (
+                      <>
+                        <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="text-slate-700 dark:text-slate-300 text-[11px]">
+                          Last login: <span className="font-mono font-bold">{lastLoginLog ? lastLoginLog.timestamp : "No recorded session"}</span>
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-1 border-t sm:border-t-0 sm:border-l border-slate-200 dark:border-slate-800 pt-2 sm:pt-0 sm:pl-3.5">
+                  <span className="text-[9px] uppercase font-bold text-slate-400 font-mono block">Last Telemetry Recording</span>
+                  <div className="flex items-center gap-1.5 font-bold text-slate-700 dark:text-slate-300 text-[11px]">
+                    <Activity className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                    <span>
+                      {latestLog ? (
+                        <span>{latestLog.metric} ({latestLog.value}) @ <span className="font-mono">{latestLog.timestamp}</span></span>
+                      ) : (
+                        "No logs recorded yet"
+                      )}
+                    </span>
+                  </div>
                 </div>
               </div>
 

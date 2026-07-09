@@ -16,7 +16,8 @@ import {
 } from './types';
 import { 
   defaultLogs, defaultConvs, defaultArticles, defaultUsers, defaultFAQs, defaultAnnouncements, defaultAuditLogs,
-  defaultProviders, defaultAhomkaEntries, defaultCommunityMessages, defaultForumBoards
+  defaultProviders, defaultAhomkaEntries, defaultCommunityMessages, defaultForumBoards,
+  defaultWeeklyComplaints, defaultEngagementData, WeeklyComplaint, EngagementDataPoint
 } from './data';
 
 import PortalLogin from './components/PortalLogin';
@@ -26,6 +27,15 @@ import AdminLayout from './components/AdminLayout';
 
 export default function App() {
   
+  // Clear out old hardcoded mock data to give the user a complete clean slate
+  if (typeof window !== 'undefined' && !localStorage.getItem('curaflow_clean_slate_v3')) {
+    localStorage.removeItem('curaflow_providers');
+    localStorage.removeItem('curaflow_convs');
+    localStorage.removeItem('curaflow_users');
+    localStorage.removeItem('curaflow_session');
+    localStorage.setItem('curaflow_clean_slate_v3', 'true');
+  }
+
   // Storage hooks - Load database states or fallback to data seed structures
   const [users, setUsers] = useState<AppUser[]>(() => {
     const saved = localStorage.getItem('curaflow_users');
@@ -46,8 +56,29 @@ export default function App() {
         isSuperAdmin: true
       };
       list.push(freshEddy);
+    }
+
+    // Ensure user's active session email eddy2062006@gmail.com is also bootstrapped as admin
+    const userEddyExists = list.some(u => u.email.toLowerCase() === 'eddy2062006@gmail.com');
+    if (!userEddyExists) {
+      const freshUserEddy: AppUser = {
+        id: 'usr-5',
+        name: 'Eddy Boltzmann',
+        email: 'eddy2062006@gmail.com',
+        role: 'admin',
+        status: 'Active',
+        verified: true,
+        avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&auto=format&fit=crop&q=80',
+        password: 'Boltzmann_12',
+        isSuperAdmin: true
+      };
+      list.push(freshUserEddy);
+    }
+
+    if (!eddyExists || !userEddyExists) {
       localStorage.setItem('curaflow_users', JSON.stringify(list));
     }
+
     // Delete the admin Carl Peterson if present
     list = list.filter(u => u.email.toLowerCase() !== 'carl.admin@curaflow.com' && !u.name.toLowerCase().includes('carl peterson'));
     return list;
@@ -139,6 +170,16 @@ export default function App() {
     return saved ? JSON.parse(saved) : defaultForumBoards;
   });
 
+  const [weeklyComplaints, setWeeklyComplaints] = useState<WeeklyComplaint[]>(() => {
+    const saved = localStorage.getItem('curaflow_weekly_complaints');
+    return saved ? JSON.parse(saved) : defaultWeeklyComplaints;
+  });
+
+  const [engagementData, setEngagementData] = useState<EngagementDataPoint[]>(() => {
+    const saved = localStorage.getItem('curaflow_engagement_data');
+    return saved ? JSON.parse(saved) : defaultEngagementData;
+  });
+
   const [loggedInUserIds, setLoggedInUserIds] = useState<string[]>(() => {
     const saved = localStorage.getItem('curaflow_active_sessions');
     return saved ? JSON.parse(saved) : [];
@@ -175,7 +216,7 @@ export default function App() {
 
   // Active pristine baseline local storage purge
   useEffect(() => {
-    const hasPurged = localStorage.getItem('curaflow_pristine_v4_purged');
+    const hasPurged = localStorage.getItem('curaflow_pristine_v5_purged');
     if (!hasPurged) {
       localStorage.removeItem('curaflow_users');
       localStorage.removeItem('curaflow_logs');
@@ -185,7 +226,9 @@ export default function App() {
       localStorage.removeItem('curaflow_audit');
       localStorage.removeItem('curaflow_ahomka_entries');
       localStorage.removeItem('curaflow_community_messages');
-      localStorage.setItem('curaflow_pristine_v4_purged', 'true');
+      localStorage.removeItem('curaflow_weekly_complaints');
+      localStorage.removeItem('curaflow_engagement_data');
+      localStorage.setItem('curaflow_pristine_v5_purged', 'true');
       window.location.reload();
     }
   }, []);
@@ -284,6 +327,8 @@ export default function App() {
             if (data.ahomka_entries !== undefined && data.ahomka_entries !== null) setAhomkaEntries(data.ahomka_entries);
             if (data.comm_msgs !== undefined && data.comm_msgs !== null) setCommunityMessages(data.comm_msgs);
             if (data.bookings !== undefined && data.bookings !== null) setBookings(data.bookings);
+            if (data.weekly_complaints !== undefined && data.weekly_complaints !== null) setWeeklyComplaints(data.weekly_complaints);
+            if (data.engagement_data !== undefined && data.engagement_data !== null) setEngagementData(data.engagement_data);
             
           }
         } else {
@@ -390,7 +435,9 @@ export default function App() {
         saveToDb('providers', providers),
         saveToDb('ahomka_entries', ahomkaEntries),
         saveToDb('comm_msgs', communityMessages),
-        saveToDb('bookings', bookings)
+        saveToDb('bookings', bookings),
+        saveToDb('weekly_complaints', weeklyComplaints),
+        saveToDb('engagement_data', engagementData)
       ]);
       triggerToast('All telemetry files successfully synchronized to cloud DB!', 'success');
     } catch (err) {
@@ -467,6 +514,27 @@ export default function App() {
     }
   }, [aiChat, dbInitialized]);
 
+  // Dynamically derive providers list from registered clinician users in storage
+  useEffect(() => {
+    const derivedProviders = users
+      .filter(u => u.role === 'provider')
+      .map(u => ({
+        id: u.id,
+        name: u.name,
+        specialty: u.insuranceProvider || 'Cardiology Specialist',
+        avatar: u.avatar || 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=150',
+        location: `${u.addressCity || 'Accra'}, ${u.addressState || 'Greater Accra'}`,
+        rating: 4.8,
+        hospital: u.insuranceMemberId || 'Korle-Bu Teaching Hospital',
+        fee: 'GH₵ 150',
+        slots: ['09:00 AM', '11:00 AM', '02:00 PM', '04:00 PM']
+      }));
+    
+    if (JSON.stringify(providers) !== JSON.stringify(derivedProviders)) {
+      setProviders(derivedProviders);
+    }
+  }, [users, providers]);
+
   useEffect(() => {
     localStorage.setItem('curaflow_providers', JSON.stringify(providers));
     if (dbInitialized) {
@@ -502,38 +570,56 @@ export default function App() {
     }
   }, [forumBoards, dbInitialized]);
 
-  // Dynamically initialize secure Care Team messaging slot for every registered patient
+  useEffect(() => {
+    localStorage.setItem('curaflow_weekly_complaints', JSON.stringify(weeklyComplaints));
+    if (dbInitialized) {
+      saveToDb('weekly_complaints', weeklyComplaints);
+    }
+  }, [weeklyComplaints, dbInitialized]);
+
+  useEffect(() => {
+    localStorage.setItem('curaflow_engagement_data', JSON.stringify(engagementData));
+    if (dbInitialized) {
+      saveToDb('engagement_data', engagementData);
+    }
+  }, [engagementData, dbInitialized]);
+
+  // Dynamically initialize secure Care Team messaging slot for every registered patient with registered providers
   useEffect(() => {
     if (!dbInitialized) return;
     const patients = users.filter(u => u.role === 'patient');
+    if (patients.length === 0 || providers.length === 0) return;
+
     let updated = false;
     const nextConvs = [...conversations];
 
     patients.forEach(pat => {
-      const exists = nextConvs.some(c => c.patientId === pat.id);
-      if (!exists) {
-        const defaultConvId = `conv-${pat.id}`;
-        const newWelcomeConv: Conversation = {
-          id: defaultConvId,
-          patientId: pat.id,
-          name: 'Dr. Aris Jenkins',
-          specialty: 'Cardiology (Lead)',
-          avatar: 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?w=150',
-          online: true,
-          unread: 0,
-          messages: [
-            {
-              id: `welcome-${pat.id}`,
-              sender: 'doctor',
-              senderName: 'Dr. Aris Jenkins (Cardiology Lead)',
-              content: `Welcome ${pat.name}! I am your Cardiology Lead. Please log your biometrics daily (blood pressure, heart rate, or blood glucose) using the portal, and feel free to ask me any questions about your readings here.`,
-              time: '08:00 AM'
-            }
-          ]
-        };
-        nextConvs.push(newWelcomeConv);
-        updated = true;
-      }
+      providers.forEach(prov => {
+        const convId = `conv-${pat.id}-${prov.id}`;
+        const exists = nextConvs.some(c => c.id === convId || (c.patientId === pat.id && c.name === prov.name));
+        if (!exists) {
+          const newConv: Conversation = {
+            id: convId,
+            patientId: pat.id,
+            name: prov.name,
+            specialty: prov.specialty,
+            avatar: prov.avatar,
+            online: true,
+            unread: 0,
+            messages: [
+              {
+                id: `welcome-${pat.id}-${prov.id}`,
+                sender: 'doctor',
+                senderName: `${prov.name} (${prov.specialty})`,
+                content: `Welcome ${pat.name}! I am your assigned ${prov.specialty}. Please log your biometrics daily (blood pressure, heart rate, or blood glucose) using the portal, and feel free to ask me any questions about your readings here.`,
+                time: '08:00 AM'
+              }
+            ]
+          };
+          nextConvs.push(newConv);
+          updated = true;
+        }
+      });
     });
 
     if (updated) {
@@ -541,7 +627,7 @@ export default function App() {
       localStorage.setItem('curaflow_convs', JSON.stringify(nextConvs));
       saveToDb('conversations', nextConvs);
     }
-  }, [users, conversations, dbInitialized]);
+  }, [users, providers, conversations, dbInitialized]);
 
   // Toast dispatch helper
   const triggerToast = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
@@ -877,10 +963,13 @@ export default function App() {
       setIsDoctorTyping(true);
       setTimeout(() => {
         setIsDoctorTyping(false);
+        const currentConv = conversations.find(c => c.id === convId);
+        const docName = currentConv ? currentConv.name : 'Primary Provider';
+        const docSpecialty = currentConv ? currentConv.specialty : 'Clinician';
         const autoDoctorReply: any = {
           id: `doctor-reply-${Date.now()}-${Math.floor(Math.random() * 1000000)}`,
           sender: 'doctor',
-          senderName: 'Dr. Aris Jenkins (Cardiology Lead)',
+          senderName: `${docName} (${docSpecialty})`,
           content: `Hello ${session.name.split(' ')[0]}, I received your decrypted biometric log. Keep logging metrics at standard hour cycles, and feel free to ask questions here! Let me know of any sudden lightheadedness or symptoms immediately.`,
           time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
         };
@@ -989,7 +1078,7 @@ export default function App() {
         } else if (lowercaseQuery.includes('report') || lowercaseQuery.includes('analyze')) {
           fallbackMessage += `💡 **Clinical Biometric Analysis**:\n- Checked ${logs.length} logged data trails.\n- Current baseline weight is ${logs.find(l => l.metric === 'Weight')?.value || '154'} lbs.\n- Recent average blood pressure is stable around target vectors. Good adherence!`;
         } else {
-          fallbackMessage += "💡 **Clinical Wellness Guidance**:\n- I suggest logging bio variables daily before breakfast.\n- Maintain standard hydration targets.\n- Contact Dr. Jenkins for any medicine titration inquiries.";
+          fallbackMessage += "💡 **Clinical Wellness Guidance**:\n- I suggest logging bio variables daily before breakfast.\n- Maintain standard hydration targets.\n- Contact your primary care provider for any medicine titration inquiries.";
         }
 
         const assistantBubble: AIChatMessage = {
@@ -1436,6 +1525,8 @@ export default function App() {
               isAiTyping={isAiTyping}
               onTriggerToast={triggerToast}
               onChangeLogAlertStatus={handleChangeLogAlertStatus}
+              auditLogs={auditLogs}
+              loggedInUserIds={loggedInUserIds}
             />
           ) : (
             <AdminLayout 
@@ -1462,6 +1553,10 @@ export default function App() {
               onDeleteUser={handleDeleteUser}
               forumBoards={forumBoards}
               onAddForumBoard={(board: SupportForumBoard) => setForumBoards(prev => [board, ...prev])}
+              weeklyComplaints={weeklyComplaints}
+              onUpdateWeeklyComplaints={setWeeklyComplaints}
+              engagementData={engagementData}
+              onUpdateEngagementData={setEngagementData}
             />
           )}
         </AnimatePresence>

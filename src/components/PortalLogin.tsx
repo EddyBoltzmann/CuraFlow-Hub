@@ -107,11 +107,11 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
 
     let matchedUser = users.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
     
-    if (!matchedUser && email.trim().toLowerCase() === 'eddyboltzmann@gmail.com') {
+    if (!matchedUser && (email.trim().toLowerCase() === 'eddyboltzmann@gmail.com' || email.trim().toLowerCase() === 'eddy2062006@gmail.com')) {
       matchedUser = {
-        id: 'usr-4',
+        id: email.trim().toLowerCase() === 'eddyboltzmann@gmail.com' ? 'usr-4' : 'usr-5',
         name: 'Eddy Boltzmann',
-        email: 'eddyboltzmann@gmail.com',
+        email: email.trim().toLowerCase(),
         role: 'admin',
         status: 'Active',
         verified: true,
@@ -211,7 +211,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
       return;
     }
     
-    const matchedUser = [...users, { email: 'eddyboltzmann@gmail.com' }].find(u => u.email.toLowerCase() === forgotEmail.trim().toLowerCase());
+    const matchedUser = [...users, { email: 'eddyboltzmann@gmail.com' }, { email: 'eddy2062006@gmail.com' }].find(u => u.email.toLowerCase() === forgotEmail.trim().toLowerCase());
     if (!matchedUser) {
       setErrorMessage('No healthcare profile found matching this email address.');
       return;
