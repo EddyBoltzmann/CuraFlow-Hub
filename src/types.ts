@@ -6,6 +6,7 @@
 export interface HealthLog {
   id: string;
   timestamp: string;
+  dateOfReading?: string;
   metric: 'Blood Pressure' | 'Blood Glucose' | 'Active Calories' | 'Sleep Quality' | 'Weight' | 'Heart Rate' | 'BMI';
   value: string;
   trend: 'Stable' | 'Elevated' | 'Decline';
@@ -13,6 +14,12 @@ export interface HealthLog {
   notes?: string;
   isHighRisk?: boolean;
   patientId?: string;
+  patientName?: string;
+  userId?: string;
+  firstName?: string;
+  lastName?: string;
+  sex?: string;
+  dob?: string;
 }
 
 export interface Message {
@@ -59,8 +66,11 @@ export interface CMSArticle {
 }
 
 export interface AppUser {
-  id: string;
+  id: string; // 4-digit User ID in range 0001 to 9999
+  userId?: string; // 4-digit User ID string (0001-9999)
   name: string;
+  firstName?: string;
+  lastName?: string;
   email: string;
   role: 'patient' | 'provider' | 'admin';
   status: 'Active' | 'Suspended' | 'Pending Verification';
@@ -68,6 +78,13 @@ export interface AppUser {
   avatar?: string;
   password?: string;
   isSuperAdmin?: boolean;
+  phone?: string;
+  dob?: string; // Date of birth (required for all users e.g. YYYY-MM-DD)
+  sex?: 'Male' | 'Female' | 'Other' | string;
+  city?: string;
+  state?: string;
+  primaryDiagnosis?: string;
+  emergencyContact?: string;
   emergencyContactName?: string;
   emergencyContactPhone?: string;
   emergencyContactRelation?: string;
@@ -91,6 +108,7 @@ export interface FAQ {
   id: string;
   question: string;
   answer: string;
+  category?: string;
 }
 
 export interface Announcement {
@@ -107,6 +125,7 @@ export interface AuditLog {
   userId: string;
   userName: string;
   userRole: string;
+  role?: string;
   action: string;
   details: string;
   ip: string;
@@ -115,12 +134,14 @@ export interface AuditLog {
 export interface AhomkaEntry {
   id: string;
   timestamp: string;
+  dateOfReading?: string;
   mood: number;
   stress: number;
   painLevel: number;
   symptoms: string[];
   notes: string;
   reliefScore: number;
+  comfortScore?: number;
   
   // Blood Pressure Step-by-Step Fields helper attributes
   systolic?: number;
@@ -130,6 +151,12 @@ export interface AhomkaEntry {
   medicationAdherence?: string;
   readings?: { systolic: number; diastolic: number; pulse: number }[];
   patientId?: string;
+  patientName?: string;
+  userId?: string;
+  firstName?: string;
+  lastName?: string;
+  sex?: string;
+  dob?: string;
 }
 
 export interface CommunityMessage {
@@ -164,6 +191,12 @@ export interface AppointmentBooking {
   mode: 'Video Call' | 'Audio Call' | 'Secure Chat';
   dateTime: string;
   status: 'Confirmed' | 'Completed' | 'Cancelled';
+  patientName?: string;
+  specialization?: string;
+  date?: string;
+  timeSlot?: string;
+  type?: string;
+  notes?: string;
 }
 
 export interface SupportForumBoard {

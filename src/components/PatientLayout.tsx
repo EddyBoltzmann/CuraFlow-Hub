@@ -10,21 +10,22 @@ import {
 } from '../types';
 import { 
   Activity, MessageSquare, Brain, BookOpen, Bell, User, Settings, Plus, Search, Trash2, 
-  Check, CheckCircle2, AlertCircle, TrendingUp, ChevronRight, Moon, Sun, ShieldCheck, 
+  Check, CheckCircle2, AlertCircle, TrendingUp, ChevronRight, ChevronDown, Moon, Sun, ShieldCheck, 
   Send, Paperclip, FileText, X, Heart, Droplet, BatteryCharging, Clock, Sparkles, 
   Info, Mic, MicOff, Play, Pause, Video, ExternalLink, ShieldAlert, CheckCircle, RefreshCw,
-  Users, Stethoscope, Edit, Upload
+  Users, Stethoscope, Edit, Upload, HelpCircle, ThumbsUp, ThumbsDown
 } from 'lucide-react';
 import { 
-  ResponsiveContainer, AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip 
+  ResponsiveContainer, AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine 
 } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
+import { formatUserId } from '../utils/userId';
 
 interface PatientLayoutProps {
   session: AppUser;
   logs: HealthLog[];
   conversations: Conversation[];
-  aiChat: AIChatMessage[];
+  aiChat?: AIChatMessage[];
   articles: CMSArticle[];
   faqs: FAQ[];
   announcements: Announcement[];
@@ -33,8 +34,8 @@ interface PatientLayoutProps {
   onAddLog: (metric: any, value: string, notes: string) => void;
   onDeleteLog: (id: string) => void;
   onSendMessage: (convId: string, text: string, attachment?: any) => void;
-  onSendAIChat: (text: string) => Promise<void>;
-  isAiTyping: boolean;
+  onSendAIChat?: (text: string) => Promise<void>;
+  isAiTyping?: boolean;
   isDoctorTyping: boolean;
   onUpdateProfile: (updatedSession: AppUser) => void;
   onTriggerToast: (msg: string, type?: 'success' | 'info' | 'error') => void;
@@ -51,7 +52,9 @@ interface PatientLayoutProps {
     pulse?: number,
     feeling?: string,
     medicationAdherence?: string,
-    readings?: { systolic: number; diastolic: number; pulse: number }[]
+    readings?: { systolic: number; diastolic: number; pulse: number }[],
+    targetPatientId?: string,
+    customDate?: string
   ) => void;
   communityMessages: CommunityMessage[];
   onSendCommunityMessage: (channel: string, content: string) => void;
@@ -110,6 +113,10 @@ export default function PatientLayout({
   const recordingTimerRef = useRef<any>(null);
 
   // Profile forms
+  const [profFirstName, setProfFirstName] = useState(session.firstName || (session.name ? session.name.split(' ')[0] : ''));
+  const [profLastName, setProfLastName] = useState(session.lastName || (session.name ? session.name.split(' ').slice(1).join(' ') : ''));
+  const [profSex, setProfSex] = useState(session.sex || session.gender || 'Female');
+  const [profDob, setProfDob] = useState(session.dob || '');
   const [profName, setProfName] = useState(session.name);
   const [profEmail, setProfEmail] = useState(session.email);
   const [profAvatar, setProfAvatar] = useState(session.avatar || '');
@@ -165,10 +172,16 @@ export default function PatientLayout({
   const [showTimesUpModal, setShowTimesUpModal] = useState<boolean>(false);
   const [showVitalsSuccessModal, setShowVitalsSuccessModal] = useState<boolean>(false);
   const [rotatingSlideIndex, setRotatingSlideIndex] = useState<number>(0);
-  const [vitalsChartView, setVitalsChartView] = useState<'systolic' | 'diastolic' | 'pulse'>('systolic');
+  const [vitalsChartView, setVitalsChartView] = useState<'combined' | 'systolic' | 'diastolic' | 'pulse'>('combined');
   const [defaultTooltipCoord, setDefaultTooltipCoord] = useState<{ x: number, y: number } | null>(null);
   const [isHoveringChart, setIsHoveringChart] = useState<boolean>(false);
   const [isVitalsHistoryOpen, setIsVitalsHistoryOpen] = useState<boolean>(false);
+
+  // Searchable Help Center local states
+  const [helpSearchQuery, setHelpSearchQuery] = useState<string>('');
+  const [selectedHelpCategory, setSelectedHelpCategory] = useState<string>('All');
+  const [expandedFaqIds, setExpandedFaqIds] = useState<string[]>([]);
+  const [faqFeedback, setFaqFeedback] = useState<Record<string, 'up' | 'down'>>({});
 
   // Success BP readings to show inside success modal dialog
   const [vitalsSuccessSummary, setVitalsSuccessSummary] = useState<{ systolic: number; diastolic: number; pulse: number; status: string } | null>(null);
@@ -176,64 +189,6 @@ export default function PatientLayout({
   // GAP Health - Community Chat Local States
   const [commSelectedChannel, setCommSelectedChannel] = useState<string>('#nutrition-and-diabetes');
   const [commInput, setCommInput] = useState<string>('');
-
-  // GAP Health - AI Document / Lab Report Summarizer States
-  const [summarizerText, setSummarizerText] = useState<string>('');
-  const [isSummarizing, setIsSummarizing] = useState<boolean>(false);
-  const [summarizerResult, setSummarizerResult] = useState<string>('');
-  const [isDraggingFile, setIsDraggingFile] = useState<boolean>(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Handler for parsing dropped or uploaded files
-  const handleFileProcess = (file: File) => {
-    if (!file) return;
-    
-    // Check if simple text/csv/json file
-    if (file.type.startsWith('text/') || file.name.endsWith('.txt') || file.name.endsWith('.csv') || file.name.endsWith('.json')) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const text = event.target?.result as string;
-        if (text) {
-          setSummarizerText(text.slice(0, 1500));
-          onTriggerToast(`File '${file.name}' loaded successfully!`, 'success');
-        }
-      };
-      reader.readAsText(file);
-    } else {
-      // For images, PDFs, etc. we generate a friendly professional summary reference text
-      const generatedPrompt = `📄 Loaded File: ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Type: ${file.type || 'Clinical Document'}.\n\nThis diagnostic record contains patient clinical biometric numbers. Please process the cardiovascular and endocrine metrics.`;
-      setSummarizerText(generatedPrompt);
-      onTriggerToast(`Referenced document '${file.name}' successfully!`, 'success');
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDraggingFile(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDraggingFile(false);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDraggingFile(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleFileProcess(e.dataTransfer.files[0]);
-    }
-  };
-
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      handleFileProcess(e.target.files[0]);
-    }
-  };
-
-  const triggerFileSelect = () => {
-    fileInputRef.current?.click();
-  };
 
   // Filter educational articles in real time based on portal search query
   const filteredArticles = articles.filter(art => {
@@ -400,9 +355,32 @@ export default function PatientLayout({
   // Profile saves
   const handleProfileSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    let calculatedAge = session.age;
+    if (profDob) {
+      const birthDate = new Date(profDob);
+      if (!isNaN(birthDate.getTime())) {
+        const today = new Date();
+        let age = today.getFullYear() - birthDate.getFullYear();
+        const m = today.getMonth() - birthDate.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+          age--;
+        }
+        calculatedAge = age > 0 ? age : 0;
+      }
+    }
+    const computedName = (profFirstName.trim() || profLastName.trim()) 
+      ? `${profFirstName.trim()} ${profLastName.trim()}`.trim() 
+      : (profName.trim() || session.name);
+
     const updated: AppUser = {
       ...session,
-      name: profName,
+      name: computedName,
+      firstName: profFirstName.trim() || undefined,
+      lastName: profLastName.trim() || undefined,
+      sex: profSex,
+      gender: profSex,
+      dob: profDob || undefined,
+      age: calculatedAge,
       email: profEmail,
       avatar: profAvatar,
       emergencyContactName: profContactName,
@@ -618,73 +596,6 @@ export default function PatientLayout({
     onTriggerToast('Community feed message posted!', 'success');
   };
 
-  // GAP Health - AI Clinical Lab Summarizer Handler
-  const handleSummarizeReport = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!summarizerText.trim()) {
-      onTriggerToast('Please provide some clinical report text or data metrics.', 'error');
-      return;
-    }
-    setIsSummarizing(true);
-    setSummarizerResult('');
-    try {
-      // Connect to full-stack Gemini API endpoint
-      const response = await fetch('/api/gemini/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: `Please act as standard expert clinician. Summarize this lab test or medical report: "${summarizerText}". Highlight out-of-bounds metrics (elevated, deficient), explain clinical implications briefly, and offer standard natural food/lifestyle advice in bullet points. Deliver response in clean Markdown with clear division lines.`,
-          roleContext: 'patient'
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Full-stack API is restricted.');
-      }
-      const data = await response.json();
-      setSummarizerResult(data.reply || data.text || 'Unavailable.');
-      onTriggerToast('Lab report analyzed with server-side AI!', 'success');
-    } catch (err: any) {
-      console.warn('summarizer prompt fallback triggered:', err.message);
-      // Clean diagnostic parameters offline matching structure
-      setTimeout(() => {
-        let fakeResult = "📊 **CFL Health AI Diagnostic Summary (Sandbox Backup Mode)**\n\n";
-        
-        const lowerText = summarizerText.toLowerCase();
-        if (lowerText.includes('pressure') || lowerText.includes('bp') || lowerText.includes('systolic')) {
-          fakeResult += "### 🔴 Cardiovascular Blood Pressure Profile\n";
-          fakeResult += "- **Observations**: Elevating metrics imply mild cardiovascular tension.\n";
-          fakeResult += "- **Standard Bounds**: Target range is ≤ 120/80 mmHg. Critical concerns are classified > 140/90.\n";
-          fakeResult += "- **Action Plan**: Practice sodium restriction (< 1500mg/day) and review circadian REM guidance on the Education Library.\n\n";
-        }
-        if (lowerText.includes('hba1c') || lowerText.includes('glucose') || lowerText.includes('sugar')) {
-          fakeResult += "### 🩸 Endocrinology Glycemic Profile\n";
-          fakeResult += "- **Observations**: High fasting blood sugar or glycemic spiking noted.\n";
-          fakeResult += "- **Standard Bounds**: Fasting glucose target is 70-99 mg/dL. Chronic elevation signifies insulin resistance.\n";
-          fakeResult += "- **Action Plan**: Plan 15-minute post-intake moderate walking, focus on high-fiber whole foods (like local brown millet), and monitor indices pre-meal.\n\n";
-        }
-        if (lowerText.includes('cholesterol') || lowerText.includes('ldl') || lowerText.includes('lipid')) {
-          fakeResult += "### 🧪 Lipid Cardiovascular Profile\n";
-          fakeResult += "- **Observations**: Hyperlipidemia parameters are detected.\n";
-          fakeResult += "- **Standard Bounds**: Standard LDL target lies below 100 mg/dL.\n";
-          fakeResult += "- **Action Plan**: Shift dietary focus towards high soluble fats (omega-3 oils, local seeds) and decrease hydrogenated lipids.\n\n";
-        }
-        
-        if (fakeResult === "📊 **CFL Health AI Diagnostic Summary (Sandbox Backup Mode)**\n\n") {
-          fakeResult += "### 📋 General Diagnostic Telemetry\n";
-          fakeResult += "- **Observations**: Logged report data evaluated.\n";
-          fakeResult += "- **Baseline Analysis**: Primary indices reflect stable clinical margins, but some metrics invite adjustments.\n";
-          fakeResult += "- **Action Plan**: Daily log trackings across sleep and blood pressure on the Health Tracker Logs pane. Consult your clinical provider during your next consultation slot.";
-        }
-        
-        setSummarizerResult(fakeResult);
-        onTriggerToast('Diagnostic report analyzed with medical offsets.', 'info');
-      }, 1200);
-    } finally {
-      setIsSummarizing(false);
-    }
-  };
-
   // Simulating live wave recording notes
   const toggleVoiceRecording = () => {
     if (isRecordingVoice) {
@@ -883,13 +794,13 @@ export default function PatientLayout({
       <div className="md:hidden flex items-center justify-between bg-white dark:bg-slate-900 px-4 py-3 border-b border-slate-200 dark:border-slate-800 shrink-0 select-none">
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest font-mono">Panel</span>
-          <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
+          <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
             {activeTab === 'dashboard' && 'Wellness Dashboard'}
             {activeTab === 'messages' && 'Secure Messaging'}
             {activeTab === 'ahomka' && 'Health Vitals'}
             {activeTab === 'community' && 'Community Chat'}
             {activeTab === 'education' && 'Education Library'}
-            {activeTab === 'ai' && 'CFL Health AI'}
+            {activeTab === 'help' && 'Help Center & FAQs'}
             {activeTab === 'profile' && 'Patient Profile'}
           </span>
         </div>
@@ -928,7 +839,7 @@ export default function PatientLayout({
               <div className="space-y-6">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
                   <div className="flex items-center gap-2">
-                    <div className="px-2 py-0.5 bg-indigo-600 rounded-lg flex items-center justify-center text-white text-xs font-black shadow-lg">
+                    <div className="px-2 py-0.5 bg-emerald-600 rounded-lg flex items-center justify-center text-white text-xs font-black shadow-lg">
                       CFL
                     </div>
                     <span className="font-sans font-bold text-slate-900 dark:text-white">Patient Hub</span>
@@ -944,7 +855,7 @@ export default function PatientLayout({
                 <div className="space-y-1">
                   <button 
                     onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'dashboard' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <Activity className="w-4 h-4" />
                     <span>Wellness Dashboard</span>
@@ -952,7 +863,7 @@ export default function PatientLayout({
                   
                   <button 
                     onClick={() => { setActiveTab('messages'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'messages' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'messages' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <MessageSquare className="w-4 h-4" />
                     <span className="flex items-center justify-between w-full">
@@ -965,7 +876,7 @@ export default function PatientLayout({
 
                   <button 
                     onClick={() => { setActiveTab('ahomka'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'ahomka' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'ahomka' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <Heart className="w-4 h-4" />
                     <span>Ahomka Ho (Health Vitals)</span>
@@ -973,7 +884,7 @@ export default function PatientLayout({
 
                   <button 
                     onClick={() => { setActiveTab('community'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'community' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'community' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <Users className="w-4 h-4" />
                     <span>Community Chat</span>
@@ -981,26 +892,23 @@ export default function PatientLayout({
 
                   <button 
                     onClick={() => { setActiveTab('education'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'education' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'education' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <BookOpen className="w-4 h-4" />
                     <span>Education Library</span>
                   </button>
 
                   <button 
-                    onClick={() => { setActiveTab('ai'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'ai' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    onClick={() => { setActiveTab('help'); setIsMobileMenuOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'help' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
-                    <Brain className="w-4 h-4" />
-                    <span className="flex items-center gap-1">
-                      <span>CFL Health AI</span>
-                      <Sparkles className="w-3 h-3 text-amber-400 fill-amber-400 animate-pulse" />
-                    </span>
+                    <HelpCircle className="w-4 h-4" />
+                    <span>Help Center & FAQs</span>
                   </button>
 
                   <button 
                     onClick={() => { setActiveTab('profile'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'profile' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'profile' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <User className="w-4 h-4" />
                     <span>Update Profile Info</span>
@@ -1022,7 +930,7 @@ export default function PatientLayout({
           <button 
             id="tab-pat-dashboard"
             onClick={() => setActiveTab('dashboard')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'dashboard' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Activity className="w-4 h-4" />
             <span className="md:inline">Wellness Dashboard</span>
@@ -1031,7 +939,7 @@ export default function PatientLayout({
           <button 
             id="tab-pat-messages"
             onClick={() => setActiveTab('messages')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'messages' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'messages' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <MessageSquare className="w-4 h-4" />
             <span className="md:inline flex items-center justify-between w-full">
@@ -1045,7 +953,7 @@ export default function PatientLayout({
           <button 
             id="tab-pat-ahomka"
             onClick={() => setActiveTab('ahomka')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'ahomka' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'ahomka' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Heart className="w-4 h-4" />
             <span className="md:inline font-bold">Ahomka Ho (Health Vitals)</span>
@@ -1054,7 +962,7 @@ export default function PatientLayout({
           <button 
             id="tab-pat-community"
             onClick={() => setActiveTab('community')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'community' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'community' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Users className="w-4 h-4" />
             <span className="md:inline">Community Chat</span>
@@ -1063,28 +971,25 @@ export default function PatientLayout({
           <button 
             id="tab-pat-education"
             onClick={() => setActiveTab('education')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'education' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'education' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <BookOpen className="w-4 h-4" />
             <span className="md:inline">Education Library</span>
           </button>
 
           <button 
-            id="tab-pat-ai"
-            onClick={() => setActiveTab('ai')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'ai' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            id="tab-pat-help"
+            onClick={() => setActiveTab('help')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'help' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
-            <Brain className="w-4 h-4" />
-            <span className="md:inline flex items-center gap-1">
-              <span>CFL Health AI</span>
-              <Sparkles className="w-3 h-3 text-amber-400 fill-amber-400 animate-pulse" />
-            </span>
+            <HelpCircle className="w-4 h-4" />
+            <span className="md:inline">Help Center & FAQs</span>
           </button>
 
           <button 
             id="tab-pat-profile"
             onClick={() => setActiveTab('profile')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'profile' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'profile' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <User className="w-4 h-4" />
             <span className="md:inline">Update Profile Info</span>
@@ -1108,14 +1013,14 @@ export default function PatientLayout({
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
             
-            <div className="bg-gradient-to-r from-indigo-800 to-slate-900 text-white rounded-2xl shadow-xl p-6 relative overflow-hidden">
+            <div className="bg-gradient-to-r from-emerald-800 to-slate-900 text-white rounded-2xl shadow-xl p-6 relative overflow-hidden">
               <div className="absolute right-0 bottom-0 top-0 opacity-10 w-44">
                 <Heart className="w-full h-full text-white" />
               </div>
               <div className="relative">
-                <span className="bg-indigo-500 text-[10px] font-bold px-2.5 py-1 rounded-full text-white uppercase tracking-wider">Patient Portal</span>
+                <span className="bg-emerald-500 text-[10px] font-bold px-2.5 py-1 rounded-full text-white uppercase tracking-wider">Patient Portal</span>
                 <h2 className="font-display text-xl font-bold mt-3 leading-tight">Welcome to your secure health desk, {session.name}</h2>
-                <p className="text-xs text-indigo-200 mt-1 max-w-lg">Monitor critical trends, direct message your care providers in real time, and audit educational journals HIPAA-securely.</p>
+                <p className="text-xs text-emerald-200 mt-1 max-w-lg">Monitor critical trends, direct message your care providers in real time, and audit educational journals HIPAA-securely.</p>
               </div>
             </div>
 
@@ -1143,7 +1048,7 @@ export default function PatientLayout({
               <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center justify-between">
                   <span>Rest bpm</span>
-                  <Activity className="w-3.5 h-3.5 text-indigo-500" />
+                  <Activity className="w-3.5 h-3.5 text-emerald-500" />
                 </p>
                 <p className="text-2xl font-black text-slate-950 dark:text-white mt-1">{activeHR} <span className="text-[10px] font-normal text-slate-400">bpm</span></p>
                 <span className="text-[10px] text-green-500 font-bold bg-green-50 px-2 py-0.5 rounded mt-2 inline-block">Standard Rhythm</span>
@@ -1173,7 +1078,7 @@ export default function PatientLayout({
                   <Info className="w-3.5 h-3.5 text-slate-400" />
                 </p>
                 <p className="text-2xl font-black text-slate-950 dark:text-white mt-1">{activeBMI}</p>
-                <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold bg-indigo-50 dark:bg-indigo-950/20 px-2 py-0.5 rounded mt-2 inline-block">Healthy BMI (18.5-24.9)</span>
+                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/20 px-2 py-0.5 rounded mt-2 inline-block">Healthy BMI (18.5-24.9)</span>
               </div>
 
               {/* Combined caloric and compliance summary details */}
@@ -1192,7 +1097,7 @@ export default function PatientLayout({
                   </p>
                 </div>
                 <div className="text-right shrink-0">
-                  <span className="font-mono text-xl font-bold text-indigo-600 dark:text-indigo-400">
+                  <span className="font-mono text-xl font-bold text-emerald-600 dark:text-emerald-400">
                     {totalDaysLogged === 0 ? "Pending" : totalDaysLogged >= 4 ? "Excellent" : "Stable"}
                   </span>
                 </div>
@@ -1254,9 +1159,9 @@ export default function PatientLayout({
                 </div>
 
                 {/* 3. Average Heart Rate Card */}
-                <div className="p-4 bg-indigo-50/40 dark:bg-indigo-950/10 rounded-xl border border-indigo-100/60 dark:border-indigo-900/30 flex items-center gap-4">
-                  <div className="p-3 bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 rounded-xl shadow-2xs shrink-0 border border-slate-100 dark:border-slate-700">
-                    <Activity className="w-5 h-5 text-indigo-500" />
+                <div className="p-4 bg-emerald-50/40 dark:bg-emerald-950/10 rounded-xl border border-emerald-100/60 dark:border-emerald-900/30 flex items-center gap-4">
+                  <div className="p-3 bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 rounded-xl shadow-2xs shrink-0 border border-slate-100 dark:border-slate-700">
+                    <Activity className="w-5 h-5 text-emerald-500" />
                   </div>
                   <div>
                     <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block font-mono">Heart Rate Average</span>
@@ -1289,9 +1194,9 @@ export default function PatientLayout({
                     <div 
                       key={rem.id}
                       onClick={() => toggleReminder(rem.id)}
-                      className={`p-3 rounded-lg border text-xs cursor-pointer flex items-center gap-3 transition ${rem.done ? 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 line-through border-transparent' : 'bg-white dark:bg-slate-900 border-slate-200 hover:border-indigo-400 text-slate-800 dark:text-slate-100 shadow-2xs'}`}
+                      className={`p-3 rounded-lg border text-xs cursor-pointer flex items-center gap-3 transition ${rem.done ? 'bg-slate-50 dark:bg-slate-800/40 text-slate-400 line-through border-transparent' : 'bg-white dark:bg-slate-900 border-slate-200 hover:border-emerald-400 text-slate-800 dark:text-slate-100 shadow-2xs'}`}
                     >
-                      <div className={`w-4 h-4 rounded-xs border flex items-center justify-center shrink-0 ${rem.done ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300 bg-white'}`}>
+                      <div className={`w-4 h-4 rounded-xs border flex items-center justify-center shrink-0 ${rem.done ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-300 bg-white'}`}>
                         {rem.done && <Check className="w-3 h-3 stroke-[3]" />}
                       </div>
                       <span className="font-medium">{rem.label}</span>
@@ -1304,7 +1209,7 @@ export default function PatientLayout({
               <div className="lg:col-span-2 bg-[#F8FAFC] dark:bg-slate-900/60 p-6 rounded-xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col justify-between">
                 <div>
                   <h4 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-indigo-600" />
+                    <Sparkles className="w-4 h-4 text-emerald-600" />
                     Clinician Assistant Recommendation
                   </h4>
                   <p className="text-[11px] text-slate-500 leading-relaxed mt-2 italic">
@@ -1323,7 +1228,7 @@ export default function PatientLayout({
                   </span>
                   <button 
                     onClick={() => setActiveTab('ai')}
-                    className="p-1 px-3 bg-indigo-600 hover:bg-slate-900 text-white font-bold rounded-lg text-[10px] transition"
+                    className="p-1 px-3 bg-emerald-600 hover:bg-slate-900 text-white font-bold rounded-lg text-[10px] transition"
                   >
                     Discuss with AI Assistant
                   </button>
@@ -1347,7 +1252,7 @@ export default function PatientLayout({
                   <div 
                     key={c.id}
                     onClick={() => { setChatSelectedConvId(c.id); c.unread = 0; }}
-                    className={`p-3 mx-2 rounded-lg cursor-pointer transition ${c.id === chatSelectedConvId ? 'bg-indigo-50 text-indigo-600 border border-indigo-100' : 'hover:bg-slate-50 text-slate-600'}`}
+                    className={`p-3 mx-2 rounded-lg cursor-pointer transition ${c.id === chatSelectedConvId ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'hover:bg-slate-50 text-slate-600'}`}
                   >
                     <p className="font-bold text-xs truncate leading-none">{c.name}</p>
                     <p className="text-[10px] text-slate-400 truncate mt-1">{c.specialty}</p>
@@ -1393,7 +1298,7 @@ export default function PatientLayout({
                         setSelectedDetailProvider(fallbackProv);
                       }
                     }}
-                    className="p-1 px-2.5 bg-indigo-50 dark:bg-slate-800 border hover:bg-indigo-100 dark:hover:bg-slate-700 border-indigo-100 dark:border-slate-700 rounded-lg text-[9px] font-bold text-indigo-700 dark:text-indigo-400 transition flex items-center gap-1 cursor-pointer"
+                    className="p-1 px-2.5 bg-emerald-50 dark:bg-slate-800 border hover:bg-emerald-100 dark:hover:bg-slate-700 border-emerald-100 dark:border-slate-700 rounded-lg text-[9px] font-bold text-emerald-700 dark:text-emerald-400 transition flex items-center gap-1 cursor-pointer"
                   >
                     <Stethoscope className="w-2.5 h-2.5" />
                     <span>View Provider Profile</span>
@@ -1406,8 +1311,8 @@ export default function PatientLayout({
               <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-white dark:bg-slate-950/20">
                 {selectedConv.messages.map(m => (
                   <div key={m.id} className={`flex ${m.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-xs p-3 rounded-xl text-xs ${m.sender === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-none'}`}>
-                      <div className="flex items-center justify-between gap-2 mb-1 border-b border-indigo-500/20 pb-0.5">
+                    <div className={`max-w-xs p-3 rounded-xl text-xs ${m.sender === 'user' ? 'bg-emerald-600 text-white rounded-tr-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-none'}`}>
+                      <div className="flex items-center justify-between gap-2 mb-1 border-b border-emerald-500/20 pb-0.5">
                         <p className="font-bold text-[9px] opacity-75">{m.senderName}</p>
                         {m.sender === 'user' && (
                           <div className="flex items-center gap-1.5 opacity-80 hover:opacity-100 transition shrink-0 select-none">
@@ -1417,7 +1322,7 @@ export default function PatientLayout({
                                 setEditingMessageId(m.id);
                                 setChatInputMessage(m.content);
                               }}
-                              className="text-white hover:text-indigo-200 transition p-0.5"
+                              className="text-white hover:text-emerald-200 transition p-0.5"
                               title="Edit sent message"
                             >
                               <Edit className="w-2.5 h-2.5" />
@@ -1453,7 +1358,7 @@ export default function PatientLayout({
                       )}
 
                       {m.attachmentType === 'audio' && (
-                        <div className="mb-2 p-2 bg-indigo-900/20 rounded border border-indigo-500/20 flex items-center gap-2 text-[10px] font-semibold">
+                        <div className="mb-2 p-2 bg-emerald-900/20 rounded border border-emerald-500/20 flex items-center gap-2 text-[10px] font-semibold">
                           <span className="animate-pulse">🎙️</span>
                           <span className="truncate">Voice Memo (Simulated Playback ready)</span>
                         </div>
@@ -1478,7 +1383,7 @@ export default function PatientLayout({
               <div className="p-3 border-t shrink-0 bg-slate-50/10 space-y-2">
                 
                 {editingMessageId && (
-                  <div className="flex items-center justify-between bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-[11px] py-1.5 px-3 rounded-lg">
+                  <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[11px] py-1.5 px-3 rounded-lg">
                     <span className="font-medium">Editing previously sent message...</span>
                     <button 
                       type="button"
@@ -1486,7 +1391,7 @@ export default function PatientLayout({
                         setEditingMessageId(null);
                         setChatInputMessage('');
                       }}
-                      className="text-indigo-500 hover:text-indigo-700 font-bold dark:text-indigo-400 dark:hover:text-indigo-300 cursor-pointer"
+                      className="text-emerald-500 hover:text-emerald-700 font-bold dark:text-emerald-400 dark:hover:text-emerald-300 cursor-pointer"
                     >
                       Cancel Edit
                     </button>
@@ -1535,12 +1440,12 @@ export default function PatientLayout({
                     value={chatInputMessage}
                     onChange={(e) => setChatInputMessage(e.target.value)}
                     placeholder="Type encrypted message notices..."
-                    className="flex-1 bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-600 focus:bg-white dark:focus:bg-slate-800"
+                    className="flex-1 bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-600 focus:bg-white dark:focus:bg-slate-800"
                   />
                   <button 
                     id="pat-message-submit"
                     type="submit"
-                    className="bg-indigo-600 hover:bg-slate-900 text-white font-bold p-1 px-3.5 rounded-lg text-xs transition"
+                    className="bg-emerald-600 hover:bg-slate-900 text-white font-bold p-1 px-3.5 rounded-lg text-xs transition"
                   >
                     <Send className="w-3.5 h-3.5" />
                   </button>
@@ -1568,7 +1473,7 @@ export default function PatientLayout({
                 <div key={art.id} className="bg-white dark:bg-slate-900 border rounded-xl overflow-hidden shadow-xs flex flex-col justify-between">
                   <img src={art.bannerUrl} alt="banner" className="w-full h-36 object-cover" referrerPolicy="no-referrer" />
                   <div className="p-4 flex-1">
-                    <span className="text-[9px] font-bold text-indigo-600 tracking-widest uppercase">{art.category}</span>
+                    <span className="text-[9px] font-bold text-emerald-600 tracking-widest uppercase">{art.category}</span>
                     <h5 className="font-bold text-xs text-slate-900 mt-1 leading-snug">{art.title}</h5>
                     <p className="text-[11px] text-slate-500 mt-1 lines-clamp-2">{art.summary}</p>
                   </div>
@@ -1582,201 +1487,12 @@ export default function PatientLayout({
           </div>
         )}
 
-        {/* TAB 5: GAP Clinical AI assistant with split-grid Diagnostic Summarizer */}
-        {activeTab === 'ai' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            
-            {/* Conversations with AI Assistant */}
-            <div className="bg-slate-950 text-white rounded-2xl p-6 h-[480px] flex flex-col justify-between overflow-hidden shadow-2xl border border-slate-900">
-              <div className="p-3 border-b border-indigo-900/30 flex justify-between items-center bg-slate-900/30 shrink-0">
-                <div className="flex items-center gap-3">
-                  <Brain className="w-5 h-5 text-indigo-500 animate-pulse" />
-                  <div>
-                    <h4 className="font-bold text-xs text-slate-200">CFL Health AI Clinician Companion</h4>
-                    <p className="text-[9px] text-indigo-400">Powered by server-side gemini-3.5-flash with local offsets</p>
-                  </div>
-                </div>
-                <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-2.5 py-0.5 rounded font-bold">API Online</span>
-              </div>
-
-              {/* AI message history bubble */}
-              <div className="flex-1 p-4 overflow-y-auto space-y-4 font-mono text-[11px] leading-relaxed">
-                {aiChat.map(m => (
-                  <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`p-3.5 rounded-xl max-w-md ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-slate-100 border-l-2 border-indigo-500'}`}>
-                      <p className="text-[8px] opacity-60 font-sans uppercase mb-1">{m.role === 'user' ? session.name : 'CFL Health AI Assistant'}</p>
-                      <p className="whitespace-pre-line leading-relaxed">{m.content}</p>
-                    </div>
-                  </div>
-                ))}
-                {isAiTyping && (
-                  <div className="bg-slate-900 p-3 rounded-lg text-slate-400 animate-pulse text-[10px] w-56">
-                    CFL Health AI matching clinical benchmarks...
-                  </div>
-                )}
-              </div>
-
-              {/* suggested guidelines questions prompts */}
-              <div className="px-4 py-2 border-t border-indigo-950 flex flex-wrap gap-1.5 shrink-0">
-                <button 
-                  onClick={() => onSendAIChat('Analyze blood pressure logs')}
-                  className="bg-slate-900 hover:bg-slate-800 text-[9px] font-bold py-1 px-2.5 rounded border border-indigo-500/20 text-indigo-300"
-                >
-                  Analyze BP trends
-                </button>
-                <button 
-                  onClick={() => onSendAIChat('Explain optimal weight target calculations')}
-                  className="bg-slate-900 hover:bg-slate-800 text-[9px] font-bold py-1 px-2.5 rounded border border-indigo-500/20 text-indigo-300"
-                >
-                  Weight guidelines
-                </button>
-                <button 
-                  onClick={() => onSendAIChat('How should I structure sleep REM quality cycles?')}
-                  className="bg-slate-900 hover:bg-slate-800 text-[9px] font-bold py-1 px-2.5 rounded border border-indigo-500/20 text-indigo-300"
-                >
-                  Explain REM quality
-                </button>
-              </div>
-
-              {/* input formulary */}
-              <form onSubmit={(e) => {
-                e.preventDefault();
-                const inputField = document.getElementById('pat-ai-input') as HTMLInputElement;
-                if (inputField && inputField.value.trim()) {
-                  onSendAIChat(inputField.value.trim());
-                  inputField.value = '';
-                }
-              }} className="p-3 border-t border-indigo-950 flex gap-2 shrink-0">
-                <input 
-                  id="pat-ai-input"
-                  type="text"
-                  placeholder="Ask CFL Health AI (e.g. 'Explain diastolic vs systolic targets')..."
-                  className="flex-1 bg-slate-900/80 rounded-xl px-4 py-2 text-xs text-white border-none focus:ring-1 focus:ring-indigo-600 focus:outline-none"
-                />
-                <button 
-                  id="pat-ai-submit"
-                  type="submit"
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1 shrink-0"
-                >
-                  <Sparkles className="w-3.5 h-3.5 fill-current" />
-                  <span>Synthesize</span>
-                </button>
-              </form>
-            </div>
-
-            {/* GAP Health - Lab Diagnostic Report Summarizer */}
-            <div className="bg-white dark:bg-slate-100/10 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm p-6 h-[480px] flex flex-col justify-between overflow-hidden">
-              <div className="p-3 border-b border-indigo-100 flex items-center gap-3 shrink-0">
-                <FileText className="w-5 h-5 text-indigo-600" />
-                <div>
-                  <h4 className="font-bold text-xs text-slate-800 dark:text-white">Diagnostic Lab Report Summarizer</h4>
-                  <p className="text-[10px] text-slate-400">Summarize high-risk clinical ranges with CFL Health AI automatically</p>
-                </div>
-              </div>
-
-              {/* Summarizer view content area */}
-              <div className="flex-1 p-4 overflow-y-auto space-y-4 text-xs font-semibold">
-                {summarizerResult ? (
-                  <div className="p-3.5 bg-indigo-50/45 dark:bg-slate-950/40 border-l-4 border-indigo-500 rounded-lg text-slate-800 dark:text-slate-200 leading-relaxed overflow-y-auto h-full max-h-[220px] markdown-body">
-                    <p className="whitespace-pre-line">{summarizerResult}</p>
-                  </div>
-                ) : (
-                  <div 
-                    onClick={triggerFileSelect}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    className={`h-full max-h-[220px] flex flex-col items-center justify-center text-center p-4 cursor-pointer border-2 border-dashed rounded-xl transition duration-150 ${
-                      isDraggingFile 
-                        ? 'border-indigo-600 bg-indigo-50/30 text-indigo-700 dark:border-indigo-500 dark:bg-indigo-950/20' 
-                        : 'border-slate-200 hover:border-indigo-400 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900/30 text-slate-400'
-                    }`}
-                  >
-                    <input 
-                      type="file"
-                      ref={fileInputRef}
-                      onChange={handleFileInputChange}
-                      className="hidden"
-                    />
-                    <Sparkles className={`w-7 h-7 text-indigo-500 mb-2 ${isDraggingFile ? 'scale-110' : 'animate-bounce animate-pulse'}`} />
-                    <p className="font-bold text-slate-800 dark:text-slate-300">
-                      {isDraggingFile ? 'Drop your report file here!' : 'Drag & drop report or click to select'}
-                    </p>
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500 max-w-xs mt-1">
-                      Supports medical scans, text logs, or clinical CSV files up to 5MB.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* form controls */}
-              <form onSubmit={handleSummarizeReport} className="p-3 border-t space-y-3 shrink-0">
-                <div>
-                  <textarea 
-                    value={summarizerText}
-                    onChange={(e) => setSummarizerText(e.target.value)}
-                    placeholder="Example: HbA1c is 6.4%, Lipids show LDL limits are 128 mg/dL, with Blood Pressure measuring 138/89 mmHg..."
-                    rows={2}
-                    className="w-full bg-slate-50 dark:bg-slate-800 border focus:border-indigo-600 focus:outline-none rounded-xl text-xs py-2 px-3 text-slate-950 dark:text-white font-medium"
-                    required
-                  />
-                  {/* suggested template buttons */}
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    <button 
-                      type="button"
-                      onClick={() => setSummarizerText('Diagnostic Lipid blood report: LDL Cholesterol measures 148 mg/dL, Triglycerides 190. Fasting glucose is 108 mg/dL.')}
-                      className="bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-[8px] text-slate-500 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 font-bold"
-                    >
-                      LDL / Glucose Template
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => setSummarizerText('Cardiorespiratory checkup: Systolic average blood pressure 138 mmHg, Diastolic blood pressure average 89 mmHg. Heart rate is 84.')}
-                      className="bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-[8px] text-slate-500 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 font-bold"
-                    >
-                      BP / Pulse Template
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex justify-between items-center gap-4">
-                  <button 
-                    type="button"
-                    onClick={() => { setSummarizerText(''); setSummarizerResult(''); }}
-                    className="p-2 text-slate-400 hover:text-red-600 font-bold text-[10px] border rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 shrink-0"
-                  >
-                    Clear
-                  </button>
-                  <button 
-                    id="pat-summarize-submit"
-                    type="submit"
-                    disabled={isSummarizing}
-                    className="flex-1 bg-indigo-600 hover:bg-slate-900 disabled:bg-slate-200 text-white font-black py-2 rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer transition shadow-sm"
-                  >
-                    {isSummarizing ? (
-                      <span className="animate-pulse">Processing analysis...</span>
-                    ) : (
-                      <>
-                        <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-                        <span>Summarize Report Metrics</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            </div>
-
-          </div>
-        )}
-
-
-
         {/* GAP Health GAP-2: Ahomka Ho Logs Well-being tab */}
         {activeTab === 'ahomka' && (
           <div className="space-y-6">
             
             {/* Header Banner */}
-            <div className="bg-gradient-to-r from-emerald-800 to-indigo-900 text-white rounded-2xl shadow-lg p-6 relative overflow-hidden">
+            <div className="bg-gradient-to-r from-emerald-800 to-emerald-900 text-white rounded-2xl shadow-lg p-6 relative overflow-hidden">
               <div className="absolute right-0 bottom-0 top-0 opacity-10 w-48">
                 <Activity className="w-full h-full text-white" />
               </div>
@@ -1858,7 +1574,7 @@ export default function PatientLayout({
                       <span className="text-[10px] font-bold text-slate-400 uppercase font-mono">My Pulse (Average Rate)</span>
                       {ahomkaEntries.length > 0 && ahomkaEntries[0].pulse ? (
                         <div>
-                          <h4 className="text-2xl font-black text-indigo-600 dark:text-indigo-400 mt-1">
+                          <h4 className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
                             {ahomkaEntries[0].pulse} <span className="text-xs text-slate-400 font-medium font-sans">bpm</span>
                           </h4>
                           <p className="text-[10px] text-slate-500 mt-1">Resting tachycardia screen stable.</p>
@@ -1867,7 +1583,7 @@ export default function PatientLayout({
                         <h4 className="text-base font-bold text-slate-400 mt-2">No pulse logged yet</h4>
                       )}
                     </div>
-                    <div className="w-12 h-12 rounded-full bg-indigo-50 dark:bg-indigo-950/20 flex items-center justify-center text-indigo-600">
+                    <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/20 flex items-center justify-center text-emerald-600">
                       <Activity className="w-6 h-6 animate-pulse" />
                     </div>
                   </div>
@@ -1879,45 +1595,84 @@ export default function PatientLayout({
                   
                   {/* Recharts Vital Averages Trend AreaGraph */}
                   <div className="lg:col-span-2 bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
                       <div>
                         <h4 className="font-bold text-sm text-slate-900 dark:text-white">Multi-Reading Longitudinal Trends</h4>
-                        <p className="text-[10px] text-slate-500">Ahomka Ho calculated blood pressure & heart rate indices</p>
+                        <p className="text-[10px] text-slate-500">Ahomka Ho calculated blood pressure & heart rate indices over time</p>
                       </div>
                       
-                      {/* Interactive toggle view pagination dots for chart */}
-                      <div className="flex items-center gap-1.5 self-start sm:self-center">
+                      {/* Interactive toggle view buttons for chart */}
+                      <div className="flex items-center gap-1.5 self-start sm:self-center flex-wrap">
+                        <button
+                          onClick={() => setVitalsChartView('combined')}
+                          className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all ${
+                            vitalsChartView === 'combined' ? 'bg-emerald-600 text-white shadow-xs' : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'
+                          }`}
+                        >
+                          All Vitals
+                        </button>
                         <button
                           onClick={() => setVitalsChartView('systolic')}
                           className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all ${
-                            vitalsChartView === 'systolic' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                            vitalsChartView === 'systolic' ? 'bg-emerald-600 text-white shadow-xs' : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'
                           }`}
                         >
-                          Systolic Trend
+                          Systolic
                         </button>
                         <button
                           onClick={() => setVitalsChartView('diastolic')}
                           className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all ${
-                            vitalsChartView === 'diastolic' ? 'bg-emerald-600 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                            vitalsChartView === 'diastolic' ? 'bg-sky-600 text-white shadow-xs' : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'
                           }`}
                         >
-                          Diastolic Trend
+                          Diastolic
                         </button>
                         <button
                           onClick={() => setVitalsChartView('pulse')}
                           className={`px-3 py-1 text-[10px] font-bold rounded-lg transition-all ${
-                            vitalsChartView === 'pulse' ? 'bg-rose-500 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                            vitalsChartView === 'pulse' ? 'bg-rose-500 text-white shadow-xs' : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300'
                           }`}
                         >
-                          Heart Rate Trend
+                          Heart Rate
                         </button>
                       </div>
                     </div>
 
+                    {/* Overall Historical Calculated Means Summary Banner */}
+                    {ahomkaEntries.length > 0 && (() => {
+                      const validSys = ahomkaEntries.filter(e => e.systolic !== undefined && e.systolic !== null);
+                      const validDia = ahomkaEntries.filter(e => e.diastolic !== undefined && e.diastolic !== null);
+                      const validPulse = ahomkaEntries.filter(e => e.pulse !== undefined && e.pulse !== null);
+
+                      const avgSys = validSys.length > 0 ? Math.round(validSys.reduce((acc, curr) => acc + Number(curr.systolic), 0) / validSys.length) : 118;
+                      const avgDia = validDia.length > 0 ? Math.round(validDia.reduce((acc, curr) => acc + Number(curr.diastolic), 0) / validDia.length) : 78;
+                      const avgPulse = validPulse.length > 0 ? Math.round(validPulse.reduce((acc, curr) => acc + Number(curr.pulse), 0) / validPulse.length) : 72;
+
+                      return (
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-4 p-3 bg-emerald-50/70 dark:bg-emerald-950/25 border border-emerald-100 dark:border-emerald-900/50 rounded-xl text-xs">
+                          <div className="flex items-center gap-2">
+                            <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                            <span className="font-extrabold text-slate-800 dark:text-slate-200">Historical Mean Readings:</span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 font-mono font-extrabold text-[11px]">
+                            <span className="px-2.5 py-1 bg-white dark:bg-slate-900 rounded-lg border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 shadow-2xs">
+                              Systolic Avg: {avgSys} mmHg
+                            </span>
+                            <span className="px-2.5 py-1 bg-white dark:bg-slate-900 rounded-lg border border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-400 shadow-2xs">
+                              Diastolic Avg: {avgDia} mmHg
+                            </span>
+                            <span className="px-2.5 py-1 bg-white dark:bg-slate-900 rounded-lg border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-400 shadow-2xs">
+                              Pulse Avg: {avgPulse} bpm
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     <div className="w-full h-[220px]">
                       {ahomkaEntries.length === 0 ? (
                         <div className="w-full h-full flex flex-col items-center justify-center border border-dashed border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-900/40 text-center p-6 space-y-2">
-                          <div className="w-10 h-10 rounded-full bg-indigo-50 dark:bg-indigo-950/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                          <div className="w-10 h-10 rounded-full bg-emerald-50 dark:bg-emerald-950/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
                             <Activity className="w-5 h-5" />
                           </div>
                           <p className="text-xs font-bold text-slate-500">No longitudinal trends logged yet.</p>
@@ -1926,8 +1681,13 @@ export default function PatientLayout({
                       ) : (
                         <ResponsiveContainer width="100%" height="100%">
                           <AreaChart 
-                            data={ahomkaEntries.slice().reverse()} 
-                            margin={{ top: 5, right: 5, left: -25, bottom: 0 }}
+                            data={ahomkaEntries.slice().reverse().map(e => ({
+                              ...e,
+                              systolic: e.systolic !== undefined && e.systolic !== null ? Number(e.systolic) : undefined,
+                              diastolic: e.diastolic !== undefined && e.diastolic !== null ? Number(e.diastolic) : undefined,
+                              pulse: e.pulse !== undefined && e.pulse !== null ? Number(e.pulse) : undefined,
+                            }))} 
+                            margin={{ top: 12, right: 10, left: -20, bottom: 5 }}
                             accessibilityLayer={true}
                             onMouseMove={(e) => {
                               if (e && e.activeTooltipIndex !== undefined) {
@@ -1940,21 +1700,48 @@ export default function PatientLayout({
                           >
                             <defs>
                               <linearGradient id="colorSys" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.2}/>
-                                <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
-                              </linearGradient>
-                              <linearGradient id="colorDia" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#059669" stopOpacity={0.2}/>
+                                <stop offset="5%" stopColor="#059669" stopOpacity={0.25}/>
                                 <stop offset="95%" stopColor="#059669" stopOpacity={0}/>
                               </linearGradient>
+                              <linearGradient id="colorDia" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#0284c7" stopOpacity={0.25}/>
+                                <stop offset="95%" stopColor="#0284c7" stopOpacity={0}/>
+                              </linearGradient>
                               <linearGradient id="colorPulse" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.2}/>
+                                <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.25}/>
                                 <stop offset="95%" stopColor="#f43f5e" stopOpacity={0}/>
                               </linearGradient>
                             </defs>
-                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.15)" />
-                            <XAxis dataKey="timestamp" fontSize={8} stroke="#94a3b8" />
-                            <YAxis fontSize={9} domain={[40, 160]} stroke="#94a3b8" />
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.2)" />
+                            <XAxis 
+                              dataKey="timestamp" 
+                              fontSize={9} 
+                              stroke="#94a3b8" 
+                              interval="preserveStartEnd"
+                              minTickGap={15}
+                              tickMargin={6}
+                              tickFormatter={(val: string) => {
+                                if (!val) return '';
+                                try {
+                                  const d = new Date(val);
+                                  if (!isNaN(d.getTime())) {
+                                    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                                  }
+                                } catch (err) {}
+                                // Fallback parser for formatted strings e.g. "2026-06-04 09:00 PM" or "6/7/2026 02:19 AM"
+                                const parts = val.split(' ');
+                                if (parts[0].includes('-')) {
+                                  const sub = parts[0].split('-');
+                                  if (sub.length === 3) return `${parseInt(sub[1])}/${parseInt(sub[2])}`;
+                                }
+                                if (parts[0].includes('/')) {
+                                  const sub = parts[0].split('/');
+                                  if (sub.length === 3) return `${sub[0]}/${sub[1]}`;
+                                }
+                                return parts[0];
+                              }}
+                            />
+                            <YAxis fontSize={9} domain={[30, 180]} stroke="#94a3b8" />
                             <Tooltip 
                               active={true}
                               {...({ coordinate: (!isHoveringChart && defaultTooltipCoord) ? defaultTooltipCoord : undefined } as any)}
@@ -1967,18 +1754,18 @@ export default function PatientLayout({
                                 if (!entry) return null;
                                 
                                 return (
-                                  <div className="bg-slate-900/95 dark:bg-slate-950/95 border border-slate-800 text-white rounded-xl p-3 shadow-2xl space-y-1.5 text-left border-l-4 border-l-indigo-500 font-sans min-w-[155px]">
+                                  <div className="bg-slate-900/95 dark:bg-slate-950/95 border border-slate-800 text-white rounded-xl p-3 shadow-2xl space-y-1.5 text-left border-l-4 border-l-emerald-500 font-sans min-w-[155px]">
                                     <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">
                                       {entry.timestamp}
                                     </div>
                                     <div className="space-y-1">
                                       <div className="flex items-center justify-between gap-4">
                                         <span className="text-slate-300 text-[11px] font-medium">Systolic:</span>
-                                        <span className="font-mono text-xs font-bold text-white">{entry.systolic} mmHg</span>
+                                        <span className="font-mono text-xs font-bold text-emerald-400">{entry.systolic} mmHg</span>
                                       </div>
                                       <div className="flex items-center justify-between gap-4">
                                         <span className="text-slate-300 text-[11px] font-medium">Diastolic:</span>
-                                        <span className="font-mono text-xs font-bold text-emerald-400">{entry.diastolic} mmHg</span>
+                                        <span className="font-mono text-xs font-bold text-sky-400">{entry.diastolic} mmHg</span>
                                       </div>
                                       <div className="flex items-center justify-between gap-4">
                                         <span className="text-slate-300 text-[11px] font-medium">Pulse:</span>
@@ -1994,17 +1781,19 @@ export default function PatientLayout({
                                 );
                               }}
                             />
-                            {vitalsChartView === 'systolic' && (
+                            {(vitalsChartView === 'combined' || vitalsChartView === 'systolic') && (
                               <Area 
                                 type="monotone" 
                                 dataKey="systolic" 
-                                stroke="#4f46e5" 
-                                strokeWidth={2} 
-                                fillOpacity={1} 
+                                connectNulls={true}
+                                stroke="#059669" 
+                                strokeWidth={2.5} 
+                                fillOpacity={vitalsChartView === 'combined' ? 0.15 : 1} 
                                 fill="url(#colorSys)" 
                                 name="Systolic Average (mmHg)" 
                                 dot={(props: any) => {
                                   const { cx, cy, index } = props;
+                                  if (cx === undefined || cy === undefined) return null;
                                   const isLast = index === (ahomkaEntries.length - 1);
                                   if (isLast && cx && cy) {
                                     if (!defaultTooltipCoord || Math.abs(defaultTooltipCoord.x - cx) > 1 || Math.abs(defaultTooltipCoord.y - cy) > 1) {
@@ -2021,7 +1810,7 @@ export default function PatientLayout({
                                       r={isLast ? 6.5 : 4} 
                                       stroke="#ffffff" 
                                       strokeWidth={isLast ? 2.5 : 1.5} 
-                                      fill="#4f46e5" 
+                                      fill="#059669" 
                                       className={isLast ? "animate-pulse shadow-sm" : ""}
                                     />
                                   );
@@ -2029,17 +1818,19 @@ export default function PatientLayout({
                                 activeDot={{ r: 8, strokeWidth: 2, stroke: '#ffffff' }} 
                               />
                             )}
-                            {vitalsChartView === 'diastolic' && (
+                            {(vitalsChartView === 'combined' || vitalsChartView === 'diastolic') && (
                               <Area 
                                 type="monotone" 
                                 dataKey="diastolic" 
-                                stroke="#059669" 
-                                strokeWidth={2} 
-                                fillOpacity={1} 
+                                connectNulls={true}
+                                stroke="#0284c7" 
+                                strokeWidth={2.5} 
+                                fillOpacity={vitalsChartView === 'combined' ? 0.12 : 1} 
                                 fill="url(#colorDia)" 
                                 name="Diastolic Average (mmHg)" 
                                 dot={(props: any) => {
                                   const { cx, cy, index } = props;
+                                  if (cx === undefined || cy === undefined) return null;
                                   const isLast = index === (ahomkaEntries.length - 1);
                                   if (isLast && cx && cy) {
                                     if (!defaultTooltipCoord || Math.abs(defaultTooltipCoord.x - cx) > 1 || Math.abs(defaultTooltipCoord.y - cy) > 1) {
@@ -2056,7 +1847,7 @@ export default function PatientLayout({
                                       r={isLast ? 6.5 : 4} 
                                       stroke="#ffffff" 
                                       strokeWidth={isLast ? 2.5 : 1.5} 
-                                      fill="#059669" 
+                                      fill="#0284c7" 
                                       className={isLast ? "animate-pulse shadow-sm" : ""}
                                     />
                                   );
@@ -2064,17 +1855,19 @@ export default function PatientLayout({
                                 activeDot={{ r: 8, strokeWidth: 2, stroke: '#ffffff' }} 
                               />
                             )}
-                            {vitalsChartView === 'pulse' && (
+                            {(vitalsChartView === 'combined' || vitalsChartView === 'pulse') && (
                               <Area 
                                 type="monotone" 
                                 dataKey="pulse" 
+                                connectNulls={true}
                                 stroke="#f43f5e" 
-                                strokeWidth={2} 
-                                fillOpacity={1} 
+                                strokeWidth={2.5} 
+                                fillOpacity={vitalsChartView === 'combined' ? 0.10 : 1} 
                                 fill="url(#colorPulse)" 
                                 name="Heart Rate (BPM)" 
                                 dot={(props: any) => {
                                   const { cx, cy, index } = props;
+                                  if (cx === undefined || cy === undefined) return null;
                                   const isLast = index === (ahomkaEntries.length - 1);
                                   if (isLast && cx && cy) {
                                     if (!defaultTooltipCoord || Math.abs(defaultTooltipCoord.x - cx) > 1 || Math.abs(defaultTooltipCoord.y - cy) > 1) {
@@ -2105,10 +1898,16 @@ export default function PatientLayout({
                     </div>
 
                     {/* Pagination indicators visual cues */}
-                    <div className="flex justify-center gap-1.5 mt-3">
-                      <span className={`w-2 h-2 rounded-full transition-all ${vitalsChartView === 'systolic' ? 'bg-indigo-600 w-4' : 'bg-slate-200'}`}></span>
-                      <span className={`w-2 h-2 rounded-full transition-all ${vitalsChartView === 'diastolic' ? 'bg-emerald-600 w-4' : 'bg-slate-200'}`}></span>
-                      <span className={`w-2 h-2 rounded-full transition-all ${vitalsChartView === 'pulse' ? 'bg-rose-500 w-4' : 'bg-slate-200'}`}></span>
+                    <div className="flex justify-center gap-2 mt-3 text-[10px] font-bold">
+                      <span className={`px-2 py-0.5 rounded-md flex items-center gap-1.5 ${vitalsChartView === 'combined' || vitalsChartView === 'systolic' ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800' : 'text-slate-400'}`}>
+                        <span className="w-2 h-2 rounded-full bg-emerald-600 inline-block"></span> Systolic
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-md flex items-center gap-1.5 ${vitalsChartView === 'combined' || vitalsChartView === 'diastolic' ? 'bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-800' : 'text-slate-400'}`}>
+                        <span className="w-2 h-2 rounded-full bg-sky-600 inline-block"></span> Diastolic
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-md flex items-center gap-1.5 ${vitalsChartView === 'combined' || vitalsChartView === 'pulse' ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800' : 'text-slate-400'}`}>
+                        <span className="w-2 h-2 rounded-full bg-rose-500 inline-block"></span> Heart Rate
+                      </span>
                     </div>
 
                   </div>
@@ -2134,7 +1933,7 @@ export default function PatientLayout({
                         </div>
 
                         <div className="flex gap-2 text-[11px] text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-900/40 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800">
-                          <span className="shrink-0 text-indigo-500">🌾</span>
+                          <span className="shrink-0 text-emerald-500">🌾</span>
                           <div>
                             <span className="font-bold text-slate-800 dark:text-white block">Sorghum & Sorrel Flours</span>
                             Low sodium index grain replacements avoid glycemic tension spike loads.
@@ -2201,7 +2000,7 @@ export default function PatientLayout({
                             {e.symptoms && e.symptoms.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1">
                                 {e.symptoms.map(s => (
-                                  <span key={s} className="text-[9px] text-indigo-600 bg-indigo-50 font-semibold px-2 py-0.2 rounded">
+                                  <span key={s} className="text-[9px] text-emerald-600 bg-emerald-50 font-semibold px-2 py-0.2 rounded">
                                     {s}
                                   </span>
                                 ))}
@@ -2221,7 +2020,7 @@ export default function PatientLayout({
                             {/* Avg Pulse Rate Display */}
                             <div className="text-right border-l pl-4">
                               <span className="text-[9px] text-slate-400 font-bold block uppercase tracking-wider font-mono font-sans">Avg Pulse</span>
-                              <span className="text-sm font-bold text-indigo-600">
+                              <span className="text-sm font-bold text-emerald-600">
                                 {e.pulse} <span className="text-[10px] text-slate-400 font-normal">bpm</span>
                               </span>
                             </div>
@@ -2252,7 +2051,7 @@ export default function PatientLayout({
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
                 <div className="p-6 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] font-bold tracking-widest text-indigo-600 uppercase font-mono">Step 1 of 5</span>
+                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 1 of 5</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">Physical Comfort State</h3>
                   </div>
                   <button onClick={resetVitalsForm} className="text-slate-400 hover:text-slate-600 text-xs font-bold">Cancel</button>
@@ -2275,7 +2074,7 @@ export default function PatientLayout({
                         key={opt.key}
                         onClick={() => setVitalsFeeling(opt.key)}
                         className={`p-4 rounded-xl border cursor-pointer transition flex items-start gap-4 ${
-                          vitalsFeeling === opt.key ? 'border-indigo-600 bg-indigo-50/40 dark:bg-indigo-950/20 shadow-xs' : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 ' + opt.bg
+                          vitalsFeeling === opt.key ? 'border-emerald-600 bg-emerald-50/40 dark:bg-emerald-950/20 shadow-xs' : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 ' + opt.bg
                         }`}
                       >
                         <span className="text-2xl shrink-0">{opt.icon}</span>
@@ -2294,7 +2093,7 @@ export default function PatientLayout({
                     <button
                       disabled={!vitalsFeeling}
                       onClick={() => setVitalsStep('step2')}
-                      className="px-6 py-2.5 bg-indigo-600 disabled:opacity-50 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition"
+                      className="px-6 py-2.5 bg-emerald-600 disabled:opacity-50 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition"
                     >
                       Next Step
                     </button>
@@ -2308,7 +2107,7 @@ export default function PatientLayout({
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
                 <div className="p-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] font-bold tracking-widest text-indigo-600 uppercase font-mono">Step 2 of 5</span>
+                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 2 of 5</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">Active Symptoms Checklist</h3>
                   </div>
                   <button onClick={resetVitalsForm} className="text-slate-400 hover:text-slate-600 text-xs font-bold">Cancel</button>
@@ -2362,7 +2161,7 @@ export default function PatientLayout({
                     <button
                       disabled={vitalsSymptoms.length === 0}
                       onClick={() => setVitalsStep('reading1')}
-                      className="px-6 py-2.5 bg-indigo-600 disabled:opacity-50 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition"
+                      className="px-6 py-2.5 bg-emerald-600 disabled:opacity-50 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition"
                     >
                       Next: BP Reading #1
                     </button>
@@ -2376,7 +2175,7 @@ export default function PatientLayout({
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
                 <div className="p-6 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] font-bold tracking-widest text-indigo-600 uppercase font-mono">Step 3 of 5</span>
+                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 3 of 5</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">First Logged Measurement</h3>
                   </div>
                   <button onClick={resetVitalsForm} className="text-slate-400 hover:text-slate-600 text-xs font-bold">Cancel</button>
@@ -2402,7 +2201,7 @@ export default function PatientLayout({
                           type="number"
                           value={sys1}
                           onChange={(e) => setSys1(e.target.value)}
-                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-emerald-600"
                         />
                         <span className="text-[10px] text-slate-400 font-bold">mmHg</span>
                       </div>
@@ -2416,7 +2215,7 @@ export default function PatientLayout({
                           type="number"
                           value={dia1}
                           onChange={(e) => setDia1(e.target.value)}
-                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-emerald-600"
                         />
                         <span className="text-[10px] text-slate-400 font-bold">mmHg</span>
                       </div>
@@ -2430,7 +2229,7 @@ export default function PatientLayout({
                           type="number"
                           value={pulse1}
                           onChange={(e) => setPulse1(e.target.value)}
-                          className="w-16 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-indigo-600 dark:text-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                          className="w-16 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-emerald-600 dark:text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-600"
                         />
                         <span className="text-[10px] text-slate-400 font-bold">bpm</span>
                       </div>
@@ -2470,7 +2269,7 @@ export default function PatientLayout({
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
                 <div className="p-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] font-bold tracking-widest text-indigo-600 uppercase font-mono">Step 3 of 5 (Rest Cooldown)</span>
+                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 3 of 5 (Rest Cooldown)</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">White-Coat Comfort Buffer</h3>
                   </div>
                   <button onClick={resetVitalsForm} className="text-slate-400 hover:text-slate-600 text-xs font-bold">Cancel</button>
@@ -2499,18 +2298,18 @@ export default function PatientLayout({
                   </div>
 
                   {/* Autoplay regional medical slideshow */}
-                  <div className="bg-indigo-50/50 p-5 rounded-2xl border border-indigo-100 text-indigo-900 flex flex-col justify-between min-h-[120px]">
+                  <div className="bg-emerald-50/50 p-5 rounded-2xl border border-emerald-100 text-emerald-900 flex flex-col justify-between min-h-[120px]">
                     <div>
-                      <span className="bg-indigo-100 text-[8px] font-bold px-2 py-0.5 rounded text-indigo-700 tracking-wider font-mono uppercase">
+                      <span className="bg-emerald-100 text-[8px] font-bold px-2 py-0.5 rounded text-emerald-700 tracking-wider font-mono uppercase">
                         Heart wellness snippet
                       </span>
-                      <h5 className="font-bold text-xs mt-2 text-indigo-950">
+                      <h5 className="font-bold text-xs mt-2 text-emerald-950">
                         {rotatingSlideIndex === 0 && "Avoid speaking or moving during wait periods."}
                         {rotatingSlideIndex === 1 && "Limit heavily sodiumized broths or fast processed foods."}
                         {rotatingSlideIndex === 2 && "Hydrate with at least 2.5 Litres of safe water daily."}
                         {rotatingSlideIndex === 3 && "S sorghum porridges act as steady arterial buffers."}
                       </h5>
-                      <p className="text-[10px] text-indigo-700/80 leading-relaxed mt-1 font-medium">
+                      <p className="text-[10px] text-emerald-700/80 leading-relaxed mt-1 font-medium">
                         {rotatingSlideIndex === 0 && "Speaking generates vocal cords strain that can temporarily spike reading systolic values up to 8-12 mmHg."}
                         {rotatingSlideIndex === 1 && "Regional cubes often contain high sodium content. Try seasoning recipes with garlic, ginger, or native African basil."}
                         {rotatingSlideIndex === 2 && "Sufficient cellular hydration helps expand plasma volumetrics naturally and minimizes high systemic shear friction."}
@@ -2524,7 +2323,7 @@ export default function PatientLayout({
                         <button
                           key={dot}
                           onClick={() => setRotatingSlideIndex(dot)}
-                          className={`w-2 h-2 rounded-full transition-all ${rotatingSlideIndex === dot ? 'bg-indigo-600 w-4' : 'bg-indigo-200'}`}
+                          className={`w-2 h-2 rounded-full transition-all ${rotatingSlideIndex === dot ? 'bg-emerald-600 w-4' : 'bg-emerald-200'}`}
                         />
                       ))}
                     </div>
@@ -2547,15 +2346,15 @@ export default function PatientLayout({
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
                 <div className="p-6 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] font-bold tracking-widest text-indigo-600 uppercase font-mono">Step 4 of 5</span>
+                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 4 of 5</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">Second Logged Measurement</h3>
                   </div>
                   <button onClick={resetVitalsForm} className="text-slate-400 hover:text-slate-600 text-xs font-bold">Cancel</button>
                 </div>
 
                 <div className="p-6 space-y-6">
-                  <div className="bg-indigo-50 dark:bg-indigo-950/20 text-indigo-900 dark:text-indigo-250 p-4 rounded-lg flex gap-3 text-xs border border-indigo-100 dark:border-indigo-900/30">
-                    <CheckCircle className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                  <div className="bg-emerald-50 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-250 p-4 rounded-lg flex gap-3 text-xs border border-emerald-100 dark:border-emerald-900/30">
+                    <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                     <div>
                       <span className="font-bold block">Stability verified:</span>
                       Your body has stabilized during the 45-second comfort period. Place the second cuff inflation and write in the indices below.
@@ -2573,7 +2372,7 @@ export default function PatientLayout({
                           type="number"
                           value={sys2}
                           onChange={(e) => setSys2(e.target.value)}
-                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-emerald-600"
                         />
                         <span className="text-[10px] text-slate-400 font-bold">mmHg</span>
                       </div>
@@ -2587,7 +2386,7 @@ export default function PatientLayout({
                           type="number"
                           value={dia2}
                           onChange={(e) => setDia2(e.target.value)}
-                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-emerald-600"
                         />
                         <span className="text-[10px] text-slate-400 font-bold">mmHg</span>
                       </div>
@@ -2601,7 +2400,7 @@ export default function PatientLayout({
                           type="number"
                           value={pulse2}
                           onChange={(e) => setPulse2(e.target.value)}
-                          className="w-16 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-indigo-600 dark:text-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                          className="w-16 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-emerald-600 dark:text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-600"
                         />
                         <span className="text-[10px] text-slate-400 font-bold">bpm</span>
                       </div>
@@ -2641,7 +2440,7 @@ export default function PatientLayout({
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
                 <div className="p-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] font-bold tracking-widest text-indigo-600 uppercase font-mono">Step 4 of 5 (Rest Cooldown)</span>
+                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 4 of 5 (Rest Cooldown)</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">Second Comfort Intermission</h3>
                   </div>
                   <button onClick={resetVitalsForm} className="text-slate-400 hover:text-slate-600 text-xs font-bold">Cancel</button>
@@ -2670,18 +2469,18 @@ export default function PatientLayout({
                   </div>
 
                   {/* Autoplay regional medical slideshow */}
-                  <div className="bg-indigo-50/50 p-5 rounded-2xl border border-indigo-100 text-indigo-900 flex flex-col justify-between min-h-[120px]">
+                  <div className="bg-emerald-50/50 p-5 rounded-2xl border border-emerald-100 text-emerald-900 flex flex-col justify-between min-h-[120px]">
                     <div>
-                      <span className="bg-indigo-100 text-[8px] font-bold px-2 py-0.5 rounded text-indigo-700 tracking-wider font-mono uppercase">
+                      <span className="bg-emerald-100 text-[8px] font-bold px-2 py-0.5 rounded text-emerald-700 tracking-wider font-mono uppercase">
                         Sodium management guides
                       </span>
-                      <h5 className="font-bold text-xs mt-2 text-indigo-950">
+                      <h5 className="font-bold text-xs mt-2 text-emerald-950">
                         {rotatingSlideIndex === 0 && "Avoid speaking or moving during wait periods."}
                         {rotatingSlideIndex === 1 && "Limit heavily sodiumized broths or fast processed foods."}
                         {rotatingSlideIndex === 2 && "Hydrate with at least 2.5 Litres of safe water daily."}
                         {rotatingSlideIndex === 3 && "S sorghum porridges act as steady arterial buffers."}
                       </h5>
-                      <p className="text-[10px] text-indigo-700/80 leading-relaxed mt-1 font-medium">
+                      <p className="text-[10px] text-emerald-700/80 leading-relaxed mt-1 font-medium">
                         {rotatingSlideIndex === 0 && "Speaking generates vocal cords strain that can temporarily spike reading systolic values up to 8-12 mmHg."}
                         {rotatingSlideIndex === 1 && "Regional cubes often contain high sodium content. Try seasoning recipes with garlic, ginger, or native African basil."}
                         {rotatingSlideIndex === 2 && "Sufficient cellular hydration helps expand plasma volumetrics naturally and minimizes high systemic shear friction."}
@@ -2695,7 +2494,7 @@ export default function PatientLayout({
                         <button
                           key={dot}
                           onClick={() => setRotatingSlideIndex(dot)}
-                          className={`w-2 h-2 rounded-full transition-all ${rotatingSlideIndex === dot ? 'bg-indigo-600 w-4' : 'bg-indigo-200'}`}
+                          className={`w-2 h-2 rounded-full transition-all ${rotatingSlideIndex === dot ? 'bg-emerald-600 w-4' : 'bg-emerald-200'}`}
                         />
                       ))}
                     </div>
@@ -2718,7 +2517,7 @@ export default function PatientLayout({
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
                 <div className="p-6 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] font-bold tracking-widest text-indigo-600 uppercase font-mono">Step 5 of 5</span>
+                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 5 of 5</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">Final Reading & Medication Adherence</h3>
                   </div>
                   <button onClick={resetVitalsForm} className="text-slate-400 hover:text-slate-600 text-xs font-bold">Cancel</button>
@@ -2737,7 +2536,7 @@ export default function PatientLayout({
                           type="number"
                           value={sys3}
                           onChange={(e) => setSys3(e.target.value)}
-                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-emerald-600"
                           required
                         />
                         <span className="text-[10px] text-slate-400 font-bold">mmHg</span>
@@ -2752,7 +2551,7 @@ export default function PatientLayout({
                           type="number"
                           value={dia3}
                           onChange={(e) => setDia3(e.target.value)}
-                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                          className="w-18 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-emerald-600"
                           required
                         />
                         <span className="text-[10px] text-slate-400 font-bold">mmHg</span>
@@ -2767,7 +2566,7 @@ export default function PatientLayout({
                           type="number"
                           value={pulse3}
                           onChange={(e) => setPulse3(e.target.value)}
-                          className="w-16 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-indigo-600 dark:text-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                          className="w-16 bg-white dark:bg-slate-800 text-center border border-slate-200 dark:border-slate-700 font-mono font-black text-xl py-3 rounded-lg text-emerald-600 dark:text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-600"
                           required
                         />
                         <span className="text-[10px] text-slate-400 font-bold">bpm</span>
@@ -2806,12 +2605,12 @@ export default function PatientLayout({
                           onClick={() => setVitalsMedication(adherenceOpt)}
                           className={`p-3 rounded-lg border text-xs cursor-pointer flex items-center gap-3 transition ${
                             vitalsMedication === adherenceOpt 
-                              ? 'border-indigo-600 bg-indigo-50/20 dark:bg-indigo-950/20 font-bold text-indigo-800 dark:text-indigo-300' 
+                              ? 'border-emerald-600 bg-emerald-50/20 dark:bg-emerald-950/20 font-bold text-emerald-800 dark:text-emerald-300' 
                               : 'hover:bg-slate-50 dark:hover:bg-slate-800 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
                           }`}
                         >
                           <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                            vitalsMedication === adherenceOpt ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300 dark:border-slate-700'
+                            vitalsMedication === adherenceOpt ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-300 dark:border-slate-700'
                           }`}>
                             {vitalsMedication === adherenceOpt && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
                           </div>
@@ -2860,7 +2659,7 @@ export default function PatientLayout({
                         setVitalsStep('reading3');
                       }
                     }}
-                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition cursor-pointer"
+                    className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition cursor-pointer"
                   >
                     Start Measurement Now
                   </button>
@@ -2904,10 +2703,10 @@ export default function PatientLayout({
                     {/* Averaged Pulse Rate */}
                     <div className="pt-3.5 flex justify-between items-center text-xs text-slate-600 dark:text-slate-300 px-4">
                       <span className="font-bold flex items-center gap-1.5">
-                        <Activity className="w-4 h-4 text-indigo-500" />
+                        <Activity className="w-4 h-4 text-emerald-500" />
                         <span>Average Pulse Rate</span>
                       </span>
-                      <span className="font-mono font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/30 px-2.5 py-0.5 rounded text-[11px]">
+                      <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/30 px-2.5 py-0.5 rounded text-[11px]">
                         {vitalsSuccessSummary.pulse} bpm
                       </span>
                     </div>
@@ -2934,7 +2733,7 @@ export default function PatientLayout({
                       setVitalsSuccessSummary(null);
                       resetVitalsForm();
                     }}
-                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition cursor-pointer"
+                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition cursor-pointer"
                   >
                     Return to Dashboard
                   </button>
@@ -2969,7 +2768,7 @@ export default function PatientLayout({
                   <div 
                     key={ch.id}
                     onClick={() => setCommSelectedChannel(ch.id)}
-                    className={`p-3 mx-2 rounded-lg cursor-pointer transition ${ch.id === commSelectedChannel ? 'bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/30 text-indigo-700 dark:text-indigo-400' : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300'}`}
+                    className={`p-3 mx-2 rounded-lg cursor-pointer transition ${ch.id === commSelectedChannel ? 'bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/30 text-emerald-700 dark:text-emerald-400' : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300'}`}
                   >
                     <p className="font-bold text-xs truncate leading-none">{ch.id}</p>
                     <p className="text-[9px] text-slate-400 truncate mt-1.5 font-bold">{ch.label}</p>
@@ -2986,7 +2785,7 @@ export default function PatientLayout({
                   <h5 className="font-bold text-xs text-slate-900 dark:text-white leading-none">{commSelectedChannel}</h5>
                   <span className="text-[9px] text-slate-400 block mt-1">Peer-to-peer secure medical advisory board</span>
                 </div>
-                <div className="text-[9px] px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300 font-bold">Moderated and Verified</div>
+                <div className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-300 font-bold">Moderated and Verified</div>
               </div>
 
               {/* Chat bubble list */}
@@ -2996,7 +2795,7 @@ export default function PatientLayout({
                     {msg.senderAvatar ? (
                       <img src={msg.senderAvatar} alt={msg.senderName} className="w-8 h-8 rounded-full border shrink-0 object-cover bg-white" />
                     ) : (
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center text-[10px] font-black shrink-0 border border-slate-200 dark:border-slate-800">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-emerald-500 to-purple-600 text-white flex items-center justify-center text-[10px] font-black shrink-0 border border-slate-200 dark:border-slate-800">
                         {msg.senderName.charAt(0).toUpperCase()}
                       </div>
                     )}
@@ -3004,7 +2803,7 @@ export default function PatientLayout({
                       <div className="flex justify-between items-center mb-1">
                         <div className="flex items-center gap-1.5">
                           <span className="font-bold text-slate-900 dark:text-slate-200">{msg.senderName}</span>
-                          <span className="text-[8px] bg-indigo-100 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 rounded-sm font-black uppercase font-sans">
+                          <span className="text-[8px] bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 rounded-sm font-black uppercase font-sans">
                             {msg.senderRole}
                           </span>
                         </div>
@@ -3022,12 +2821,12 @@ export default function PatientLayout({
                   value={commInput}
                   onChange={(e) => setCommInput(e.target.value)}
                   placeholder={`Share, ask, or comment standard clinical parameters on ${commSelectedChannel}...`}
-                  className="flex-1 bg-white dark:bg-slate-800 border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-600 text-slate-900 dark:text-white"
+                  className="flex-1 bg-white dark:bg-slate-800 border rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-600 text-slate-900 dark:text-white"
                   required
                 />
                 <button 
                   type="submit"
-                  className="bg-indigo-600 hover:bg-slate-900 text-white font-bold px-4 py-1.5 rounded-lg text-xs transition cursor-pointer"
+                  className="bg-emerald-600 hover:bg-slate-900 text-white font-bold px-4 py-1.5 rounded-lg text-xs transition cursor-pointer"
                 >
                   Share
                 </button>
@@ -3048,9 +2847,77 @@ export default function PatientLayout({
               
               {/* Personal Block */}
               <div className="space-y-3">
-                <h5 className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest border-b pb-1.5">Personal details</h5>
+                <div className="flex items-center justify-between border-b pb-1.5">
+                  <h5 className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Personal details & Demographics</h5>
+                  <span className="text-[9px] bg-emerald-100 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 font-mono font-black px-2 py-0.5 rounded">
+                    User ID: {formatUserId(session.id)}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[9px] font-bold text-slate-400 block mb-1">First Name</label>
+                    <input 
+                      type="text" 
+                      value={profFirstName} 
+                      onChange={(e) => setProfFirstName(e.target.value)} 
+                      placeholder="e.g. Ama"
+                      className="w-full bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 py-2 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-white" 
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-bold text-slate-400 block mb-1">Last Name</label>
+                    <input 
+                      type="text" 
+                      value={profLastName} 
+                      onChange={(e) => setProfLastName(e.target.value)} 
+                      placeholder="e.g. Mensah"
+                      className="w-full bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 py-2 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-white" 
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[9px] font-bold text-slate-400 block mb-1">Biological Sex</label>
+                    <select 
+                      value={profSex} 
+                      onChange={(e) => setProfSex(e.target.value)} 
+                      className="w-full bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 py-2 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-white"
+                    >
+                      <option value="Female">Female</option>
+                      <option value="Male">Male</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[9px] font-bold text-slate-400 block mb-1">
+                      Date of Birth (DOB)
+                      {profDob && (
+                        <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-mono ml-1 font-normal">
+                          ({(() => {
+                            const bDate = new Date(profDob);
+                            if (isNaN(bDate.getTime())) return session.age || 0;
+                            const today = new Date();
+                            let age = today.getFullYear() - bDate.getFullYear();
+                            const m = today.getMonth() - bDate.getMonth();
+                            if (m < 0 || (m === 0 && today.getDate() < bDate.getDate())) age--;
+                            return age > 0 ? age : 0;
+                          })()} yrs)
+                        </span>
+                      )}
+                    </label>
+                    <input 
+                      type="date" 
+                      value={profDob} 
+                      onChange={(e) => setProfDob(e.target.value)} 
+                      className="w-full bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 py-2 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-white" 
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <label className="text-[9px] font-bold text-slate-400 block mb-1">Full Name</label>
+                  <label className="text-[9px] font-bold text-slate-400 block mb-1">Display Name</label>
                   <input type="text" value={profName} onChange={(e) => setProfName(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 py-2 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-white" />
                 </div>
                 <div>
@@ -3070,7 +2937,7 @@ export default function PatientLayout({
                         id="avatar-preview-thumbnail"
                       />
                     ) : (
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center text-sm font-black shrink-0 border border-slate-200 dark:border-slate-700">
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-emerald-500 to-purple-600 text-white flex items-center justify-center text-sm font-black shrink-0 border border-slate-200 dark:border-slate-700">
                         {((profName || session.name || "U").charAt(0).toUpperCase())}
                       </div>
                     )}
@@ -3099,7 +2966,7 @@ export default function PatientLayout({
 
                       {/* File select button */}
                       <div className="relative inline-block">
-                        <label className="py-1 px-2.5 bg-indigo-600 hover:bg-slate-900 text-white text-[9px] font-bold rounded-lg transition cursor-pointer select-none">
+                        <label className="py-1 px-2.5 bg-emerald-600 hover:bg-slate-900 text-white text-[9px] font-bold rounded-lg transition cursor-pointer select-none">
                           Upload Custom Image
                           <input 
                             type="file" 
@@ -3116,7 +2983,7 @@ export default function PatientLayout({
 
               {/* Emergency Contacts Block */}
               <div className="space-y-3">
-                <h5 className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest border-b pb-1.5">Emergency contact details</h5>
+                <h5 className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest border-b pb-1.5">Emergency contact details</h5>
                 <div>
                   <label className="text-[9px] font-bold text-slate-400 block mb-1">Contact Name</label>
                   <input type="text" value={profContactName} onChange={(e) => setProfContactName(e.target.value)} placeholder="e.g. Robert Jenkins" className="w-full bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 py-2 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500" />
@@ -3137,12 +3004,287 @@ export default function PatientLayout({
               <button 
                 id="pat-profile-submit-btn"
                 type="submit" 
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-slate-900 text-white font-bold rounded-lg text-xs transition"
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-slate-900 text-white font-bold rounded-lg text-xs transition"
               >
                 Commit Changes
               </button>
             </div>
           </form>
+        )}
+
+        {/* TAB 7: Searchable Help Center & Clinical FAQs */}
+        {activeTab === 'help' && (
+          <div className="space-y-6">
+            {/* Help Center Hero Search Banner */}
+            <div className="bg-gradient-to-br from-emerald-900 via-slate-900 to-emerald-950 text-white rounded-2xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="relative z-10 max-w-3xl space-y-4">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    <HelpCircle className="w-5 h-5" />
+                  </div>
+                  <span className="text-xs font-extrabold uppercase tracking-widest text-emerald-400 font-mono">
+                    Patient Knowledge & Help Center
+                  </span>
+                </div>
+                <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                  How can we support your care journey today?
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-2xl">
+                  Search through clinical protocols, blood pressure monitoring guidelines, Ahomka Ho 3-reading steps, appointment workflows, and system privacy standards.
+                </p>
+
+                {/* Real-time Search Input */}
+                <div className="relative pt-2">
+                  <div className="relative flex items-center">
+                    <Search className="w-5 h-5 text-slate-400 absolute left-4 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={helpSearchQuery}
+                      onChange={(e) => setHelpSearchQuery(e.target.value)}
+                      placeholder="Search for answers (e.g. 3-reading, high risk, appointments, security)..."
+                      className="w-full bg-slate-900/90 border border-slate-700/80 rounded-2xl pl-12 pr-10 py-3.5 text-xs sm:text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-inner font-medium"
+                    />
+                    {helpSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setHelpSearchQuery('')}
+                        className="absolute right-4 p-1 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white transition cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Category Filter Badges */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+              <span className="text-xs font-bold text-slate-400 font-mono uppercase tracking-wider shrink-0 mr-1">
+                Category:
+              </span>
+              {[
+                'All',
+                'Vitals & Blood Pressure',
+                'Appointments & Care',
+                'Account & Security',
+                'AI Assistant',
+                'General Wellness',
+                'Medication'
+              ].map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedHelpCategory(cat)}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition cursor-pointer ${
+                    selectedHelpCategory === cat
+                      ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
+                      : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+
+            {/* Filtered FAQs Output List */}
+            {(() => {
+              const queryLower = helpSearchQuery.toLowerCase().trim();
+              const filteredFaqs = faqs.filter((faq) => {
+                const matchesCat = selectedHelpCategory === 'All' || faq.category === selectedHelpCategory;
+                const matchesQuery =
+                  !queryLower ||
+                  faq.question.toLowerCase().includes(queryLower) ||
+                  faq.answer.toLowerCase().includes(queryLower) ||
+                  (faq.category && faq.category.toLowerCase().includes(queryLower));
+                return matchesCat && matchesQuery;
+              });
+
+              if (filteredFaqs.length === 0) {
+                return (
+                  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-12 text-center space-y-4">
+                    <div className="w-14 h-14 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center mx-auto text-slate-400">
+                      <HelpCircle className="w-7 h-7" />
+                    </div>
+                    <div className="space-y-1">
+                      <h3 className="font-extrabold text-slate-900 dark:text-white text-base">
+                        No matching answers found
+                      </h3>
+                      <p className="text-xs text-slate-500 max-w-md mx-auto">
+                        We couldn't find any FAQs matching "{helpSearchQuery}". Try adjusting your keywords or reach out directly to your care team.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap justify-center gap-3 pt-2">
+                      <button
+                        onClick={() => { setHelpSearchQuery(''); setSelectedHelpCategory('All'); }}
+                        className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-xl transition cursor-pointer"
+                      >
+                        Reset Search Filters
+                      </button>
+                      <button
+                        onClick={() => setActiveTab('messages')}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                        <span>Message Care Team</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-500 px-1">
+                    <span>
+                      Showing {filteredFaqs.length} {filteredFaqs.length === 1 ? 'article' : 'articles'}
+                      {helpSearchQuery && ` for "${helpSearchQuery}"`}
+                    </span>
+                    <button
+                      onClick={() => {
+                        if (expandedFaqIds.length === filteredFaqs.length) {
+                          setExpandedFaqIds([]);
+                        } else {
+                          setExpandedFaqIds(filteredFaqs.map((f) => f.id));
+                        }
+                      }}
+                      className="text-emerald-600 dark:text-emerald-400 hover:underline font-mono text-[11px] cursor-pointer"
+                    >
+                      {expandedFaqIds.length === filteredFaqs.length ? 'Collapse All' : 'Expand All'}
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {filteredFaqs.map((faq) => {
+                      const isExpanded = expandedFaqIds.includes(faq.id);
+                      const feedback = faqFeedback[faq.id];
+
+                      return (
+                        <div
+                          key={faq.id}
+                          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-2xs transition-all hover:border-slate-300 dark:hover:border-slate-700"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setExpandedFaqIds((prev) =>
+                                prev.includes(faq.id) ? prev.filter((id) => id !== faq.id) : [...prev, faq.id]
+                              );
+                            }}
+                            className="w-full text-left p-4 sm:p-5 flex items-start justify-between gap-4 cursor-pointer hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition"
+                          >
+                            <div className="space-y-1">
+                              <span className="text-[10px] font-extrabold uppercase font-mono tracking-wider px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 inline-block">
+                                {faq.category || 'General Help'}
+                              </span>
+                              <h3 className="font-extrabold text-sm sm:text-base text-slate-900 dark:text-white leading-snug">
+                                {faq.question}
+                              </h3>
+                            </div>
+                            <div className="p-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 shrink-0 mt-1">
+                              {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                            </div>
+                          </button>
+
+                          {isExpanded && (
+                            <div className="px-4 pb-5 pt-1 sm:px-5 border-t border-slate-100 dark:border-slate-800/60 bg-slate-50/40 dark:bg-slate-900/30 text-xs text-slate-700 dark:text-slate-300 leading-relaxed space-y-4 font-sans">
+                              <p className="text-slate-700 dark:text-slate-300 font-medium">
+                                {faq.answer}
+                              </p>
+
+                              {/* Feedback & Actions */}
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-200/60 dark:border-slate-800">
+                                <div className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
+                                  <span>Was this answer helpful?</span>
+                                  <button
+                                    onClick={() => setFaqFeedback((prev) => ({ ...prev, [faq.id]: 'up' }))}
+                                    className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                      feedback === 'up'
+                                        ? 'bg-emerald-100 border-emerald-300 text-emerald-700 dark:bg-emerald-950 dark:border-emerald-700 dark:text-emerald-300'
+                                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 hover:text-emerald-600'
+                                    }`}
+                                  >
+                                    <ThumbsUp className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => setFaqFeedback((prev) => ({ ...prev, [faq.id]: 'down' }))}
+                                    className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                      feedback === 'down'
+                                        ? 'bg-rose-100 border-rose-300 text-rose-700 dark:bg-rose-950 dark:border-rose-700 dark:text-rose-300'
+                                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 hover:text-rose-600'
+                                    }`}
+                                  >
+                                    <ThumbsDown className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => setActiveTab('messages')}
+                                    className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-[10px] font-bold hover:bg-slate-100 transition cursor-pointer"
+                                  >
+                                    Ask Doctor
+                                  </button>
+                                  <button
+                                    onClick={() => setActiveTab('ai')}
+                                    className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg text-[10px] font-bold hover:bg-emerald-700 transition cursor-pointer"
+                                  >
+                                    Discuss with AI
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Support Quick Links Section */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 border-t border-slate-200 dark:border-slate-800">
+              <div
+                onClick={() => setActiveTab('ai')}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl hover:border-emerald-500 dark:hover:border-emerald-500 transition cursor-pointer space-y-2 group"
+              >
+                <div className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold">
+                  <Brain className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">AI Health Assistant</h4>
+                  <p className="text-[11px] text-slate-400">Get immediate 24/7 evidence-based clinical answers.</p>
+                </div>
+              </div>
+
+              <div
+                onClick={() => setActiveTab('messages')}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl hover:border-emerald-500 dark:hover:border-emerald-500 transition cursor-pointer space-y-2 group"
+              >
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
+                  <MessageSquare className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">Direct Doctor Messaging</h4>
+                  <p className="text-[11px] text-slate-400">Send encrypted notes to your primary care specialist.</p>
+                </div>
+              </div>
+
+              <div
+                onClick={() => setActiveTab('dashboard')}
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl hover:border-emerald-500 dark:hover:border-emerald-500 transition cursor-pointer space-y-2 group"
+              >
+                <div className="w-9 h-9 rounded-xl bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 flex items-center justify-center font-bold">
+                  <Stethoscope className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-sm text-slate-900 dark:text-white">Book Appointment</h4>
+                  <p className="text-[11px] text-slate-400">Schedule virtual video/audio consultations.</p>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
           </motion.div>
         </AnimatePresence>
@@ -3193,7 +3335,10 @@ export default function PatientLayout({
       {/* AHOMKA HO ENTRY FULL DETAILS MODAL POPUP */}
       {selectedAhomkaEntry && (
         <div id="ahomka-details-modal" className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+          <div 
+            className="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col overflow-hidden"
+            style={{ width: '655px', height: '500px', maxWidth: '100%', maxHeight: '100%' }}
+          >
             
             {/* Modal Header */}
             <div className="flex items-center justify-between pb-4 border-b border-slate-150 dark:border-slate-800 shrink-0">
@@ -3217,29 +3362,29 @@ export default function PatientLayout({
             </div>
 
             {/* Scrollable Content */}
-            <div className="flex-1 overflow-y-auto overflow-x-hidden py-5 space-y-5 pr-1 font-sans text-xs">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden py-4 sm:py-5 space-y-4 sm:space-y-5 pr-1 font-sans text-xs">
               
               {/* Vitals Summary Row */}
-              <div className="grid grid-cols-3 gap-3 bg-slate-50 dark:bg-slate-950/20 p-3 rounded-xl border border-slate-100 dark:border-slate-800/60">
-                <div className="text-center p-1">
+              <div className="grid grid-cols-3 gap-1.5 sm:gap-3 bg-slate-50 dark:bg-slate-950/20 p-2 sm:p-3 rounded-xl border border-slate-100 dark:border-slate-800/60">
+                <div className="text-center p-0.5">
                   <span className="text-[9px] uppercase font-bold text-slate-400 font-mono block mb-1">Systolic BP</span>
                   <div className="flex items-baseline justify-center gap-0.5">
-                    <span className="text-lg font-black text-slate-950 dark:text-white">{selectedAhomkaEntry.systolic || '--'}</span>
-                    <span className="text-[9px] text-slate-400">mmHg</span>
+                    <span className="text-base sm:text-lg font-black text-slate-950 dark:text-white">{selectedAhomkaEntry.systolic || '--'}</span>
+                    <span className="text-[8px] sm:text-[9px] text-slate-400">mmHg</span>
                   </div>
                 </div>
-                <div className="text-center p-1 border-x border-slate-200 dark:border-slate-800">
+                <div className="text-center p-0.5 border-x border-slate-200 dark:border-slate-800">
                   <span className="text-[9px] uppercase font-bold text-slate-400 font-mono block mb-1">Diastolic BP</span>
                   <div className="flex items-baseline justify-center gap-0.5">
-                    <span className="text-lg font-black text-slate-950 dark:text-white">{selectedAhomkaEntry.diastolic || '--'}</span>
-                    <span className="text-[9px] text-slate-400">mmHg</span>
+                    <span className="text-base sm:text-lg font-black text-slate-950 dark:text-white">{selectedAhomkaEntry.diastolic || '--'}</span>
+                    <span className="text-[8px] sm:text-[9px] text-slate-400">mmHg</span>
                   </div>
                 </div>
-                <div className="text-center p-1">
-                  <span className="text-[9px] uppercase font-bold text-indigo-500 font-mono block mb-1">Rest Pulse</span>
+                <div className="text-center p-0.5">
+                  <span className="text-[9px] uppercase font-bold text-emerald-500 font-mono block mb-1">Rest Pulse</span>
                   <div className="flex items-baseline justify-center gap-0.5">
-                    <span className="text-lg font-black text-indigo-600 dark:text-indigo-400">{selectedAhomkaEntry.pulse || '--'}</span>
-                    <span className="text-[9px] text-indigo-400">bpm</span>
+                    <span className="text-base sm:text-lg font-black text-emerald-600 dark:text-emerald-400">{selectedAhomkaEntry.pulse || '--'}</span>
+                    <span className="text-[8px] sm:text-[9px] text-emerald-400">bpm</span>
                   </div>
                 </div>
               </div>
@@ -3248,14 +3393,14 @@ export default function PatientLayout({
               {selectedAhomkaEntry.readings && selectedAhomkaEntry.readings.length > 0 && (
                 <div className="space-y-2">
                   <h5 className="font-bold text-[10px] uppercase text-slate-400 tracking-wider font-mono">Sequential Readings Breakdown</h5>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                     {selectedAhomkaEntry.readings.map((reading, idx) => (
-                      <div key={idx} className="bg-white dark:bg-slate-800 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700/80 text-center relative">
-                        <span className="absolute top-1 left-1.5 text-[8px] font-bold text-slate-300 dark:text-slate-600">#{idx + 1}</span>
+                      <div key={idx} className="bg-white dark:bg-slate-800 p-1.5 sm:p-2.5 rounded-lg border border-slate-200 dark:border-slate-700/80 text-center relative">
+                        <span className="absolute top-0.5 left-1 text-[8px] font-bold text-slate-300 dark:text-slate-600">#{idx + 1}</span>
                         <div className="font-bold text-xs text-slate-900 dark:text-white mt-1">
                           {reading.systolic}/{reading.diastolic}
                         </div>
-                        <div className="text-[9px] text-slate-400 mt-0.5">Pulse: {reading.pulse} bpm</div>
+                        <div className="text-[8px] sm:text-[9px] text-slate-400 mt-0.5">Pulse: {reading.pulse}</div>
                       </div>
                     ))}
                   </div>
@@ -3268,7 +3413,7 @@ export default function PatientLayout({
                 <div className="flex flex-wrap gap-1.5">
                   {selectedAhomkaEntry.symptoms && selectedAhomkaEntry.symptoms.length > 0 ? (
                     selectedAhomkaEntry.symptoms.map(s => (
-                      <span key={s} className="px-2.5 py-1 bg-red-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-400 font-bold rounded-lg text-[9.5px]">
+                      <span key={s} className="px-2 py-0.5 sm:px-2.5 sm:py-1 bg-red-50 dark:bg-rose-950/20 text-rose-700 dark:text-rose-400 font-bold rounded-lg text-[9px] sm:text-[9.5px]">
                         ⚠️ {s}
                       </span>
                     ))
@@ -3281,8 +3426,8 @@ export default function PatientLayout({
               {/* Patient Well-being Indices */}
               <div className="space-y-2.5">
                 <h5 className="font-bold text-[10px] uppercase text-slate-400 tracking-wider font-mono">Wellness & Perceived Stress Indices</h5>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="bg-slate-50 dark:bg-slate-950/10 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800/60 flex items-center justify-between min-w-0">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+                  <div className="bg-slate-50 dark:bg-slate-950/10 p-2 sm:p-2.5 rounded-lg border border-slate-100 dark:border-slate-800/60 flex items-center justify-between min-w-0">
                     <div className="min-w-0">
                       <span className="text-[9px] text-slate-400 block font-semibold">Mood Score</span>
                       <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{selectedAhomkaEntry.mood}/10</span>
@@ -3292,17 +3437,17 @@ export default function PatientLayout({
                     </div>
                   </div>
 
-                  <div className="bg-slate-50 dark:bg-slate-950/10 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800/60 flex items-center justify-between min-w-0">
+                  <div className="bg-slate-50 dark:bg-slate-950/10 p-2 sm:p-2.5 rounded-lg border border-slate-100 dark:border-slate-800/60 flex items-center justify-between min-w-0">
                     <div className="min-w-0">
                       <span className="text-[9px] text-slate-400 block font-semibold">Perceived Stress</span>
                       <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{selectedAhomkaEntry.stress}/10</span>
                     </div>
-                    <div className="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-950/30 flex items-center justify-center text-xs shrink-0">
+                    <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/30 flex items-center justify-center text-xs shrink-0">
                       🧠
                     </div>
                   </div>
 
-                  <div className="bg-slate-50 dark:bg-slate-950/10 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800/60 flex items-center justify-between sm:col-span-2 min-w-0">
+                  <div className="bg-slate-50 dark:bg-slate-950/10 p-2 sm:p-2.5 rounded-lg border border-slate-100 dark:border-slate-800/60 flex items-center justify-between sm:col-span-2 min-w-0">
                     <div className="min-w-0 flex-1">
                       <span className="text-[9px] text-slate-400 block font-semibold">Comfort Standing</span>
                       <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block break-words whitespace-normal mt-0.5 leading-snug">
@@ -3314,7 +3459,7 @@ export default function PatientLayout({
                     </div>
                   </div>
 
-                  <div className="bg-slate-50 dark:bg-slate-950/10 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800/60 flex items-center justify-between sm:col-span-2 min-w-0">
+                  <div className="bg-slate-50 dark:bg-slate-950/10 p-2 sm:p-2.5 rounded-lg border border-slate-100 dark:border-slate-800/60 flex items-center justify-between sm:col-span-2 min-w-0">
                     <div className="min-w-0 flex-1">
                       <span className="text-[9px] text-slate-400 block font-semibold">Medication Adherence</span>
                       <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block break-words whitespace-normal mt-0.5 leading-snug">
@@ -3332,7 +3477,7 @@ export default function PatientLayout({
               {selectedAhomkaEntry.notes && (
                 <div className="space-y-1.5">
                   <h5 className="font-bold text-[10px] uppercase text-slate-400 tracking-wider font-mono">Patient Self-Annotations</h5>
-                  <div className="p-3 bg-indigo-50/40 dark:bg-indigo-950/15 text-slate-700 dark:text-slate-300 font-medium italic rounded-xl border border-indigo-100/60 dark:border-indigo-900/40 leading-relaxed">
+                  <div className="p-3 bg-emerald-50/40 dark:bg-emerald-950/15 text-slate-700 dark:text-slate-300 font-medium italic rounded-xl border border-emerald-100/60 dark:border-emerald-900/40 leading-relaxed">
                     "{selectedAhomkaEntry.notes}"
                   </div>
                 </div>
@@ -3368,7 +3513,7 @@ export default function PatientLayout({
             {/* Modal Header */}
             <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50 shrink-0">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
                   <Stethoscope className="w-4 h-4" />
                 </div>
                 <div>
@@ -3390,11 +3535,11 @@ export default function PatientLayout({
             <div className="p-6 overflow-y-auto space-y-6 font-sans">
               
               {/* Profile Card Section */}
-              <div className="flex flex-col sm:flex-row items-center gap-4 bg-indigo-50/30 dark:bg-indigo-950/10 p-4 rounded-2xl border border-indigo-100/50 dark:border-indigo-900/30">
+              <div className="flex flex-col sm:flex-row items-center gap-4 bg-emerald-50/30 dark:bg-emerald-950/10 p-4 rounded-2xl border border-emerald-100/50 dark:border-emerald-900/30">
                 <img 
                   src={selectedDetailProvider.avatar} 
                   alt={selectedDetailProvider.name} 
-                  className="w-16 h-16 rounded-full object-cover border-2 border-indigo-200 dark:border-indigo-800 shrink-0" 
+                  className="w-16 h-16 rounded-full object-cover border-2 border-emerald-200 dark:border-emerald-800 shrink-0" 
                   referrerPolicy="no-referrer"
                 />
                 <div className="text-center sm:text-left space-y-1">
@@ -3405,7 +3550,7 @@ export default function PatientLayout({
                       VERIFIED
                     </span>
                   </div>
-                  <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400">{selectedDetailProvider.specialty}</p>
+                  <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400">{selectedDetailProvider.specialty}</p>
                   <p className="text-[10px] text-slate-400 font-semibold flex items-center justify-center sm:justify-start gap-1">
                     <span>★ Rating: {selectedDetailProvider.rating || '4.8'}</span>
                     <span className="text-slate-300 dark:text-slate-700">|</span>
@@ -3454,7 +3599,7 @@ export default function PatientLayout({
               </div>
 
               {/* Security seal */}
-              <div className="flex items-center gap-2.5 bg-indigo-50/40 dark:bg-indigo-950/15 p-3 rounded-xl border border-indigo-100/50 dark:border-indigo-900/30 text-[10px] text-slate-600 dark:text-slate-300 leading-normal">
+              <div className="flex items-center gap-2.5 bg-emerald-50/40 dark:bg-emerald-950/15 p-3 rounded-xl border border-emerald-100/50 dark:border-emerald-900/30 text-[10px] text-slate-600 dark:text-slate-300 leading-normal">
                 <ShieldCheck className="w-4 h-4 shrink-0 text-emerald-600" />
                 <span>This medical provider is a board-certified clinical specialist registered under HIPAA data protection governance. Direct secure message loops are end-to-end encrypted.</span>
               </div>
@@ -3466,7 +3611,7 @@ export default function PatientLayout({
               <button
                 type="button"
                 onClick={() => setSelectedDetailProvider(null)}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition text-[11px] cursor-pointer shadow-lg shadow-indigo-600/10"
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition text-[11px] cursor-pointer shadow-lg shadow-emerald-600/10"
               >
                 Close Profile
               </button>

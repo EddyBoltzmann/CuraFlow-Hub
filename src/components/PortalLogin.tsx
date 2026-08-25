@@ -3,14 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { AppUser } from '../types';
 import { 
   Lock, UserPlus, Heart, LogIn, ShieldAlert, Sparkles, 
   Eye, EyeOff, ShieldCheck, Mail, Check, Activity, ShieldCheck as VerifiedBadge,
-  User, CheckCircle2, ChevronRight, Clock, Award
+  User, CheckCircle2, ChevronRight, Clock, Award, Calendar, Hash
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { generateUserId } from '../utils/userId';
 
 interface PortalLoginProps {
   users: AppUser[];
@@ -24,7 +25,16 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [sex, setSex] = useState<'Male' | 'Female' | 'Other' | 'Prefer not to say'>('Female');
+  const [dob, setDob] = useState('');
   const [role, setRole] = useState<'patient' | 'provider' | 'admin'>('patient');
+
+  // Preview next assigned 4-digit User ID in range 0001-9999
+  const nextAssignedUserId = useMemo(() => {
+    return generateUserId(users);
+  }, [users]);
   
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -145,7 +155,32 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
     setErrorMessage('');
     setSuccessMessage('');
 
-    if (!name.trim() || !email.trim() || !password.trim()) {
+    const effectiveFirstName = firstName.trim() || name.trim().split(' ')[0] || '';
+    const effectiveLastName = lastName.trim() || (name.trim().split(' ').length > 1 ? name.trim().split(' ').slice(1).join(' ') : '');
+    const fullName = `${effectiveFirstName} ${effectiveLastName}`.trim() || name.trim();
+
+    if (!effectiveFirstName) {
+      setErrorMessage('Please provide your First Name.');
+      return;
+    }
+
+    if (!effectiveLastName) {
+      setErrorMessage('Please provide your Last Name.');
+      return;
+    }
+
+    if (!dob) {
+      setErrorMessage('Date of Birth (DOB) is required for clinical healthcare registration.');
+      return;
+    }
+
+    const birthDate = new Date(dob);
+    if (isNaN(birthDate.getTime()) || birthDate > new Date() || birthDate.getFullYear() < 1900) {
+      setErrorMessage('Please enter a valid Date of Birth.');
+      return;
+    }
+
+    if (!email.trim() || !password.trim()) {
       setErrorMessage('Please fill in all clinical profile requirements.');
       return;
     }
@@ -156,7 +191,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
     }
 
     if (password.length < 8) {
-      setErrorMessage('Password must meet minimum military security guidelines (8+ characters).');
+      setErrorMessage('Password must meet minimum security guidelines (8+ characters).');
       return;
     }
 
@@ -166,9 +201,27 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
       return;
     }
 
+    // Generate strict 4-digit User ID in range 0001-9999
+    const assignedId = generateUserId(users);
+
+    // Calculate age from DOB
+    const today = new Date();
+    let calculatedAge = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      calculatedAge--;
+    }
+
     const newProfile: AppUser = {
-      id: `usr-${Date.now()}-${Math.floor(Math.random() * 1000000)}`,
-      name: name.trim(),
+      id: assignedId,
+      userId: assignedId,
+      name: fullName,
+      firstName: effectiveFirstName,
+      lastName: effectiveLastName,
+      sex: sex,
+      gender: sex,
+      dob: dob,
+      age: calculatedAge > 0 ? calculatedAge : 35,
       email: email.trim().toLowerCase(),
       role: role,
       status: role === 'provider' ? 'Pending Verification' : 'Active',
@@ -190,14 +243,17 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
     onRegisterSuccess(newProfile);
     
     if (role === 'provider') {
-      setSuccessMessage('📋 Clinician profile created successfully! Application is currently marked as Pending administrator credential review.');
+      setSuccessMessage(`📋 Clinician profile #${assignedId} created! Application is marked as Pending administrator review.`);
     } else {
-      setSuccessMessage('✅ Secured workspace initialized successfully! You can now log in.');
+      setSuccessMessage(`✅ Patient profile #${assignedId} initialized! You can now log in.`);
     }
     
     setIsRegistering(false);
     setEmail(newProfile.email);
     setPassword('');
+    setFirstName('');
+    setLastName('');
+    setDob('');
   };
 
   // Forgot password steps
@@ -272,13 +328,13 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
         <div className="absolute inset-0 opacity-15 bg-[radial-gradient(#312e81_1px,transparent_1px)] [background-size:16px_16px]"></div>
         
         {/* Abstract glowing medical gradient arcs */}
-        <div className="absolute top-1/4 -left-1/4 w-[400px] h-[400px] bg-indigo-600/20 rounded-full filter blur-[100px]"></div>
+        <div className="absolute top-1/4 -left-1/4 w-[400px] h-[400px] bg-emerald-600/20 rounded-full filter blur-[100px]"></div>
         <div className="absolute bottom-1/4 -right-1/4 w-[400px] h-[400px] bg-emerald-600/10 rounded-full filter blur-[100px]"></div>
 
         {/* Logo and System Flag */}
         <div className="relative flex items-center justify-between z-10">
           <div className="flex items-center gap-3">
-            <div className="px-3.5 py-1.5 bg-indigo-600 rounded-xl flex items-center justify-center text-white font-black text-sm tracking-tighter shadow-xl shadow-indigo-600/30 border border-indigo-500">
+            <div className="px-3.5 py-1.5 bg-emerald-600 rounded-xl flex items-center justify-center text-white font-black text-sm tracking-tighter shadow-xl shadow-emerald-600/30 border border-emerald-500">
               CFL
             </div>
             <div>
@@ -300,7 +356,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
               transition={{ duration: 0.55, ease: "easeOut" }}
               className="space-y-6"
             >
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-md bg-indigo-500/10 border border-indigo-400/20 text-indigo-300 text-[10px] font-bold tracking-widest uppercase font-mono">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-md bg-emerald-500/10 border border-emerald-400/20 text-emerald-300 text-[10px] font-bold tracking-widest uppercase font-mono">
                 {medicalSlides[slideIndex].tag}
               </div>
               <h2 className="text-3xl font-bold tracking-tight text-white leading-tight font-sans">
@@ -334,7 +390,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
               <button
                 key={i}
                 onClick={() => setSlideIndex(i)}
-                className={`h-1.5 rounded-full transition-all duration-305 ${i === slideIndex ? 'w-8 bg-indigo-500' : 'w-2 bg-slate-700'}`}
+                className={`h-1.5 rounded-full transition-all duration-305 ${i === slideIndex ? 'w-8 bg-emerald-500' : 'w-2 bg-slate-700'}`}
                 aria-label={`Go to slide ${i + 1}`}
               />
             ))}
@@ -344,7 +400,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
         {/* Bottom Hospital Partnership Credits */}
         <div className="relative text-xs text-slate-400 flex items-center justify-between z-10 border-t border-slate-800/60 pt-6">
           <div className="flex items-center gap-1">
-            <Award className="w-4 h-4 text-indigo-400" />
+            <Award className="w-4 h-4 text-emerald-400" />
             <span className="font-semibold text-[11px] text-slate-300">CuraFlow Clinical Network</span>
           </div>
           <span className="text-[10px] font-mono text-slate-500">v3.5.0 • HTTPS TLS-1.3</span>
@@ -357,12 +413,12 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
           
           {/* Mobile Medical Branding View */}
           <div className="lg:hidden flex flex-col items-center text-center space-y-4">
-            <div className="px-4 py-2 bg-indigo-600 rounded-2xl flex items-center justify-center text-white text-lg font-black shadow-xl">
+            <div className="px-4 py-2 bg-emerald-600 rounded-2xl flex items-center justify-center text-white text-lg font-black shadow-xl">
               CFL
             </div>
             <div>
               <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">CuraFlow Hub</h1>
-              <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest mt-0.5">Clinical Diagnostics Portal</p>
+              <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest mt-0.5">Clinical Diagnostics Portal</p>
             </div>
           </div>
 
@@ -388,7 +444,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
                 id="tab-login-select"
                 onClick={() => { setIsRegistering(false); setErrorMessage(''); setSuccessMessage(''); }}
                 className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all relative z-10 flex items-center justify-center gap-2 ${
-                  !isRegistering ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  !isRegistering ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 <LogIn className="w-3.5 h-3.5" />
@@ -405,7 +461,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
                 id="tab-register-select"
                 onClick={() => { setIsRegistering(true); setErrorMessage(''); setSuccessMessage(''); }}
                 className={`flex-1 py-2.5 rounded-lg text-xs font-bold transition-all relative z-10 flex items-center justify-center gap-2 ${
-                  isRegistering ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  isRegistering ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 <UserPlus className="w-3.5 h-3.5" />
@@ -468,14 +524,14 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
                           onChange={(e) => setForgotEmail(e.target.value)}
                           placeholder="e.g. sarah.j@gmail.com"
                           required
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 dark:focus:border-indigo-400 focus:outline-none py-3 pl-10 pr-4 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 focus:outline-none py-3 pl-10 pr-4 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
                         />
                       </div>
                     </div>
                     
                     <button 
                       type="submit" 
-                      className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white dark:bg-indigo-500 dark:hover:bg-indigo-600 rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/15 tracking-wide transition-all transform active:scale-[0.98] text-center flex items-center justify-center gap-2 cursor-pointer"
+                      className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-500 dark:hover:bg-emerald-600 rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/15 tracking-wide transition-all transform active:scale-[0.98] text-center flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <span>Send Recovery MFA Code</span>
                       <ChevronRight className="w-4 h-4" />
@@ -501,7 +557,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
                           onChange={(e) => setEnteredOtp(e.target.value)}
                           placeholder="••••••"
                           required
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 dark:focus:border-indigo-400 focus:outline-none py-3 pl-10 pr-4 rounded-xl text-xs font-bold text-slate-900 dark:text-white transition-all shadow-sm font-mono tracking-widest text-center text-sm"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 focus:outline-none py-3 pl-10 pr-4 rounded-xl text-xs font-bold text-slate-900 dark:text-white transition-all shadow-sm font-mono tracking-widest text-center text-sm"
                         />
                       </div>
                       <p className="text-[9.5px] text-slate-400 leading-normal">
@@ -511,7 +567,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
                     
                     <button 
                       type="submit" 
-                      className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white dark:bg-indigo-500 dark:hover:bg-indigo-600 rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/15 tracking-wide transition-all transform active:scale-[0.98] text-center flex items-center justify-center gap-2 cursor-pointer"
+                      className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-500 dark:hover:bg-emerald-600 rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/15 tracking-wide transition-all transform active:scale-[0.98] text-center flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <span>Verify Recovery Token</span>
                       <ChevronRight className="w-4 h-4" />
@@ -533,7 +589,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
                           onChange={(e) => setNewPassword(e.target.value)}
                           placeholder="Must be 8+ characters"
                           required
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 dark:focus:border-indigo-400 focus:outline-none py-3 pl-10 pr-4 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 focus:outline-none py-3 pl-10 pr-4 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
                         />
                       </div>
                     </div>
@@ -550,14 +606,14 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
                           onChange={(e) => setConfirmNewPassword(e.target.value)}
                           placeholder="Re-enter password"
                           required
-                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 dark:focus:border-indigo-400 focus:outline-none py-3 pl-10 pr-4 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 focus:outline-none py-3 pl-10 pr-4 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
                         />
                       </div>
                     </div>
 
                     <button 
                       type="submit" 
-                      className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white dark:bg-indigo-500 dark:hover:bg-indigo-600 rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/15 tracking-wide transition-all transform active:scale-[0.98] text-center flex items-center justify-center gap-2 cursor-pointer"
+                      className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-500 dark:hover:bg-emerald-600 rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/15 tracking-wide transition-all transform active:scale-[0.98] text-center flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <span>Update Access Password</span>
                       <ChevronRight className="w-4 h-4" />
@@ -623,7 +679,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="e.g. sarah.j@gmail.com"
                       required
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 dark:focus:border-indigo-400 focus:outline-none py-3 pl-10 pr-4 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 focus:outline-none py-3 pl-10 pr-4 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
                     />
                   </div>
                 </div>
@@ -640,7 +696,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
                         setErrorMessage('');
                         setSuccessMessage('');
                       }}
-                      className="text-[10px] text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 font-semibold hover:underline bg-transparent border-none p-0 cursor-pointer"
+                      className="text-[10px] text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-300 font-semibold hover:underline bg-transparent border-none p-0 cursor-pointer"
                     >
                       Forgot identity password?
                     </button>
@@ -656,7 +712,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••"
                       required
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 dark:focus:border-indigo-400 focus:outline-none py-3 pl-10 pr-10 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 focus:outline-none py-3 pl-10 pr-10 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
                     />
                     <button
                       type="button"
@@ -671,7 +727,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
                 <button 
                   id="login-submit-btn"
                   type="submit" 
-                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white dark:bg-indigo-500 dark:hover:bg-indigo-600 rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/15 tracking-wide transition-all transform active:scale-[0.98] text-center flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-500 dark:hover:bg-emerald-600 rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/15 tracking-wide transition-all transform active:scale-[0.98] text-center flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <span>Authorize Clinic Session</span>
                   <ChevronRight className="w-4 h-4" />
@@ -680,30 +736,120 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
             ) : (
               /* SECURE CLINICAL PROFILE REGISTRATION */
               <form onSubmit={handleRegister} className="space-y-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">Legal Full Name</label>
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">
-                      <User className="w-4 h-4" />
-                    </span>
-                    <input 
-                      id="reg-name-input"
-                      type="text" 
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="e.g. Sarah Jenkins"
-                      required
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 dark:focus:border-indigo-400 focus:outline-none py-3 pl-10 pr-4 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
-                    />
+                {/* 4-digit User ID Range 0001-9999 Allocation Notice */}
+                <div className="flex items-center justify-between p-3 bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-900/40 rounded-xl text-xs">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-mono font-black text-[11px] shadow-xs">
+                      #
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-800 dark:text-emerald-300 text-[11px] leading-tight">
+                        Assigned User ID: <span className="font-mono font-black text-emerald-600 dark:text-emerald-400 text-xs">#{nextAssignedUserId}</span>
+                      </p>
+                      <p className="text-[9.5px] text-slate-400 font-mono">System Standard Range: 0001 to 9999</p>
+                    </div>
+                  </div>
+                  <span className="text-[9px] px-2 py-0.5 rounded-full font-extrabold uppercase tracking-wider bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-mono">
+                    Auto-Indexed
+                  </span>
+                </div>
+
+                {/* First Name & Last Name */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">
+                      First Name *
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+                        <User className="w-4 h-4" />
+                      </span>
+                      <input 
+                        id="reg-firstname-input"
+                        type="text" 
+                        value={firstName}
+                        onChange={(e) => {
+                          setFirstName(e.target.value);
+                          setName(`${e.target.value} ${lastName}`.trim());
+                        }}
+                        placeholder="e.g. Sarah"
+                        required
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 focus:outline-none py-2.5 pl-10 pr-3 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">
+                      Last Name *
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+                        <User className="w-4 h-4" />
+                      </span>
+                      <input 
+                        id="reg-lastname-input"
+                        type="text" 
+                        value={lastName}
+                        onChange={(e) => {
+                          setLastName(e.target.value);
+                          setName(`${firstName} ${e.target.value}`.trim());
+                        }}
+                        placeholder="e.g. Jenkins"
+                        required
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 focus:outline-none py-2.5 pl-10 pr-3 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
+                      />
+                    </div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Sex & Date of Birth (DOB) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">Work / Personal Email</label>
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">
+                      Sex / Gender *
+                    </label>
+                    <select 
+                      id="reg-sex-select"
+                      value={sex}
+                      onChange={(e) => setSex(e.target.value as any)}
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 focus:outline-none py-2.5 px-3 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm h-[38px] cursor-pointer"
+                    >
+                      <option value="Female">Female</option>
+                      <option value="Male">Male</option>
+                      <option value="Other">Other</option>
+                      <option value="Prefer not to say">Prefer not to say</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">
+                      Date of Birth (DOB) *
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+                        <Calendar className="w-4 h-4" />
+                      </span>
+                      <input 
+                        id="reg-dob-input"
+                        type="date" 
+                        value={dob}
+                        max={new Date().toISOString().split('T')[0]}
+                        min="1900-01-01"
+                        required
+                        onChange={(e) => setDob(e.target.value)}
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 focus:outline-none py-2.5 pl-10 pr-3 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Work / Personal Email *</label>
                     <div className="relative">
                       <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">
-                        <Mail className="w-1.5 h-1.5 shrink-0" />
+                        <Mail className="w-4 h-4" />
                       </span>
                       <input 
                         id="reg-email-input"
@@ -714,18 +860,18 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
                         onChange={(e) => setEmail(e.target.value)}
                         placeholder="sarah.j@gmail.com"
                         required
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 dark:focus:border-indigo-400 focus:outline-none py-3 pl-10 pr-4 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 focus:outline-none py-2.5 pl-10 pr-3 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
                       />
                     </div>
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block">Portal Role Select</label>
+                    <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Portal Role Select *</label>
                     <select 
                       id="reg-role-select"
                       value={role}
                       onChange={(e) => setRole(e.target.value as any)}
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 dark:focus:border-indigo-400 focus:outline-none py-3 px-4 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm h-[42px]"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 focus:outline-none py-2.5 px-3 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm h-[38px] cursor-pointer"
                     >
                       <option value="patient">Patient Profile</option>
                       <option value="provider">Provider / Doctor Workspace</option>
@@ -755,7 +901,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="Establish secure cipher"
                       required
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 dark:focus:border-indigo-400 focus:outline-none py-3 pl-10 pr-10 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 focus:outline-none py-3 pl-10 pr-10 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
                     />
                     <button
                       type="button"
@@ -804,7 +950,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
                 <button 
                   id="reg-submit-btn"
                   type="submit" 
-                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white dark:bg-indigo-500 dark:hover:bg-indigo-600 rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/15 tracking-wide transition-all transform active:scale-[0.98] text-center flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-500 dark:hover:bg-emerald-600 rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/15 tracking-wide transition-all transform active:scale-[0.98] text-center flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Sparkles className="w-3.5 h-3.5 fill-current" />
                   <span>Initialize Security Account</span>

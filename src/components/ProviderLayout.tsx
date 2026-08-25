@@ -18,12 +18,12 @@ interface ProviderLayoutProps {
   session: AppUser;
   logs: HealthLog[];
   conversations: Conversation[];
-  aiChat: AIChatMessage[];
+  aiChat?: AIChatMessage[];
   users: AppUser[];
   onAddLog: (metric: any, value: string, notes: string) => void;
   onSendMessage: (convId: string, text: string) => void;
-  onSendAIChat: (text: string) => Promise<void>;
-  isAiTyping: boolean;
+  onSendAIChat?: (text: string) => Promise<void>;
+  isAiTyping?: boolean;
   onTriggerToast: (msg: string, type?: 'success' | 'info' | 'error') => void;
   onChangeLogAlertStatus: (id: string, isHighRisk: boolean) => void;
   auditLogs?: AuditLog[];
@@ -149,12 +149,11 @@ export default function ProviderLayout({
       <div className="md:hidden flex items-center justify-between bg-white dark:bg-slate-900 px-4 py-3 border-b border-slate-200 dark:border-slate-800 shrink-0 select-none">
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest font-mono">Panel</span>
-          <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
+          <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
             {activeTab === 'dashboard' && 'Clinical Dashboard'}
             {activeTab === 'directory' && 'Patient Registry'}
             {activeTab === 'messaging' && 'Patient Communications'}
             {activeTab === 'referrals' && 'Consults & Referrals'}
-            {activeTab === 'copilot' && 'EHR AI Co-Pilot'}
           </span>
         </div>
         <button
@@ -192,7 +191,7 @@ export default function ProviderLayout({
               <div className="space-y-6">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
                   <div className="flex items-center gap-2">
-                    <div className="px-2 py-0.5 bg-indigo-600 rounded-lg flex items-center justify-center text-white text-xs font-black shadow-lg">
+                    <div className="px-2 py-0.5 bg-emerald-600 rounded-lg flex items-center justify-center text-white text-xs font-black shadow-lg">
                       CFL
                     </div>
                     <span className="font-sans font-bold text-slate-900 dark:text-white">Provider Hub</span>
@@ -208,7 +207,7 @@ export default function ProviderLayout({
                 <div className="space-y-1">
                   <button 
                     onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'dashboard' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <Activity className="w-4 h-4" />
                     <span>Clinical Dashboard</span>
@@ -216,7 +215,7 @@ export default function ProviderLayout({
                   
                   <button 
                     onClick={() => { setActiveTab('directory'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'directory' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'directory' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <Users className="w-4 h-4" />
                     <span>Patient Registry</span>
@@ -224,7 +223,7 @@ export default function ProviderLayout({
 
                   <button 
                     onClick={() => { setActiveTab('messaging'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'messaging' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'messaging' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <MessageSquare className="w-4 h-4" />
                     <span>Patient Communications</span>
@@ -232,21 +231,10 @@ export default function ProviderLayout({
 
                   <button 
                     onClick={() => { setActiveTab('referrals'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'referrals' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'referrals' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <Clipboard className="w-4 h-4" />
                     <span>Consults & Referrals</span>
-                  </button>
-
-                  <button 
-                    onClick={() => { setActiveTab('copilot'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'copilot' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-                  >
-                    <Brain className="w-4 h-4" />
-                    <span className="flex items-center gap-1">
-                      <span>EHR AI Co-Pilot</span>
-                      <Sparkles className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                    </span>
                   </button>
                 </div>
               </div>
@@ -265,7 +253,7 @@ export default function ProviderLayout({
           <button 
             id="tab-prov-dashboard"
             onClick={() => setActiveTab('dashboard')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'dashboard' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Activity className="w-4 h-4" />
             <span>Clinical Dashboard</span>
@@ -274,7 +262,7 @@ export default function ProviderLayout({
           <button 
             id="tab-prov-directory"
             onClick={() => setActiveTab('directory')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'directory' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'directory' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Users className="w-4 h-4" />
             <span>Patient Registry</span>
@@ -283,7 +271,7 @@ export default function ProviderLayout({
           <button 
             id="tab-prov-messaging"
             onClick={() => setActiveTab('messaging')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'messaging' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'messaging' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <MessageSquare className="w-4 h-4" />
             <span>Patient Communications</span>
@@ -292,22 +280,10 @@ export default function ProviderLayout({
           <button 
             id="tab-prov-referrals"
             onClick={() => setActiveTab('referrals')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'referrals' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'referrals' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Clipboard className="w-4 h-4" />
             <span>Consults & Referrals</span>
-          </button>
-
-          <button 
-            id="tab-prov-copilot"
-            onClick={() => setActiveTab('copilot')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'copilot' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
-          >
-            <Brain className="w-4 h-4" />
-            <span className="flex items-center gap-1">
-              <span>EHR AI Co-Pilot</span>
-              <Sparkles className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-            </span>
           </button>
         </div>
       </aside>
@@ -399,7 +375,7 @@ export default function ProviderLayout({
                               onChangeLogAlertStatus(lg.id, !lg.isHighRisk);
                               onTriggerToast('Modified alert standing priority status', 'info');
                             }}
-                            className="bg-indigo-50 dark:bg-indigo-950/40 px-2.5 py-1 text-indigo-700 dark:text-indigo-300 font-bold rounded text-[10px] hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition"
+                            className="bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 text-emerald-700 dark:text-emerald-300 font-bold rounded text-[10px] hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition"
                           >
                             Toggle Alert Flag
                           </button>
@@ -433,7 +409,7 @@ export default function ProviderLayout({
                   placeholder="Query Patient Index..." 
                   value={dirSearchQuery}
                   onChange={(e) => setDirSearchQuery(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 py-2.5 pl-10 pr-4 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                  className="w-full bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 py-2.5 pl-10 pr-4 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-600"
                 />
               </div>
 
@@ -444,7 +420,7 @@ export default function ProviderLayout({
                   <div 
                     key={p.id}
                     onClick={() => setSelectedPatId(p.id)}
-                    className={`p-3.5 rounded-xl cursor-pointer transition border ${p.id === selectedPatId ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-900/40 text-indigo-700 dark:text-indigo-400' : 'hover:bg-slate-50 dark:hover:bg-slate-800 border-transparent text-slate-700 dark:text-slate-300'}`}
+                    className={`p-3.5 rounded-xl cursor-pointer transition border ${p.id === selectedPatId ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-400' : 'hover:bg-slate-50 dark:hover:bg-slate-800 border-transparent text-slate-700 dark:text-slate-300'}`}
                   >
                     <p className="font-bold text-xs">{p.name}</p>
                     <p className="text-[10px] text-slate-400 dark:text-slate-400 mt-1">{p.email}</p>
@@ -465,7 +441,7 @@ export default function ProviderLayout({
                   <img src={selectedPatientData.avatar} alt="patient" className="w-10 h-10 rounded-full object-cover" />
                   <div>
                     <h3 className="font-bold text-xs text-slate-900 dark:text-white leading-none">{selectedPatientData.name}</h3>
-                    <p className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold mt-1 uppercase font-sans">Patient Clinical Timeline</p>
+                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold mt-1 uppercase font-sans">Patient Clinical Timeline</p>
                   </div>
                 </div>
                 <div className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase text-right leading-relaxed">
@@ -497,7 +473,7 @@ export default function ProviderLayout({
                 <div className="space-y-1 border-t sm:border-t-0 sm:border-l border-slate-200 dark:border-slate-800 pt-2 sm:pt-0 sm:pl-3.5">
                   <span className="text-[9px] uppercase font-bold text-slate-400 font-mono block">Last Telemetry Recording</span>
                   <div className="flex items-center gap-1.5 font-bold text-slate-700 dark:text-slate-300 text-[11px]">
-                    <Activity className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                    <Activity className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                     <span>
                       {latestLog ? (
                         <span>{latestLog.metric} ({latestLog.value}) @ <span className="font-mono">{latestLog.timestamp}</span></span>
@@ -516,7 +492,7 @@ export default function ProviderLayout({
                   <p className="text-[10px] text-slate-400 mt-1">Sequential records submitted via patient portals</p>
                 </div>
 
-                <div className="relative border-l-2 border-indigo-100 pl-6 space-y-6">
+                <div className="relative border-l-2 border-emerald-100 pl-6 space-y-6">
                   {(() => {
                     const filtered = logs.filter(l => l.patientId === selectedPatientData.id || (!l.patientId && selectedPatientData.id === 'usr-1'));
                     if (filtered.length === 0) {
@@ -530,7 +506,7 @@ export default function ProviderLayout({
                       <div key={log.id} className="relative">
                         
                         {/* Timeline dot */}
-                        <span className="absolute -left-[31px] top-1.5 bg-indigo-600 w-3 h-3 rounded-full border-2 border-white"></span>
+                        <span className="absolute -left-[31px] top-1.5 bg-emerald-600 w-3 h-3 rounded-full border-2 border-white"></span>
                         
                         <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-xl border text-xs">
                           <div className="flex items-center justify-between">
@@ -547,7 +523,7 @@ export default function ProviderLayout({
 
                           <div className="mt-3 pt-2.5 border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between">
                             <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold flex items-center gap-1">
-                              <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                               Registered securely via TLS
                             </span>
                             <span className="text-[10px] text-slate-500 font-medium">Source: {log.verifiedBy}</span>
@@ -578,7 +554,7 @@ export default function ProviderLayout({
                     <div 
                       key={c.id}
                       onClick={() => setProvSelectedConvId(c.id)}
-                      className={`p-3 rounded-xl cursor-pointer border transition ${c.id === provSelectedConvId ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-900/40 text-indigo-700 dark:text-indigo-300' : 'hover:bg-slate-50 dark:hover:bg-slate-800 border-transparent text-slate-600 dark:text-slate-300'}`}
+                      className={`p-3 rounded-xl cursor-pointer border transition ${c.id === provSelectedConvId ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-300' : 'hover:bg-slate-50 dark:hover:bg-slate-800 border-transparent text-slate-600 dark:text-slate-300'}`}
                     >
                       <p className="font-bold text-xs">{c.name}</p>
                       <span className="text-[9px] text-slate-400 dark:text-slate-500 leading-none mt-1 block">Patient communication</span>
@@ -599,7 +575,7 @@ export default function ProviderLayout({
               <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-slate-50/10 dark:bg-slate-800/5 text-xs">
                 {conversations.find(c => c.id === provSelectedConvId)?.messages.map(m => (
                   <div key={m.id} className={`flex ${m.sender === 'doctor' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`p-3 rounded-xl max-w-xs ${m.sender === 'doctor' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-tl-none'}`}>
+                    <div className={`p-3 rounded-xl max-w-xs ${m.sender === 'doctor' ? 'bg-emerald-600 text-white rounded-tr-none' : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-tl-none'}`}>
                       <p className="font-bold text-[9px] opacity-75 mb-1">{m.senderName}</p>
                       <p className="leading-snug">{m.content}</p>
                       <span className="text-[7.5px] opacity-60 mt-1 block text-right">{m.time}</span>
@@ -619,7 +595,7 @@ export default function ProviderLayout({
                 />
                 <button 
                   type="submit" 
-                  className="bg-indigo-600 hover:bg-slate-900 text-white font-bold px-4 rounded-xl text-xs transition"
+                  className="bg-emerald-600 hover:bg-slate-900 text-white font-bold px-4 rounded-xl text-xs transition"
                 >
                   Forward Directions
                 </button>
@@ -680,7 +656,7 @@ export default function ProviderLayout({
 
                 <button 
                   type="submit" 
-                  className="w-full py-2 bg-indigo-600 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5"
+                  className="w-full py-2 bg-emerald-600 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5"
                 >
                   <PlusCircle className="w-4 h-4" />
                   <span>Dispatch Specialist Referral</span>
@@ -697,18 +673,18 @@ export default function ProviderLayout({
 
               <div className="space-y-3">
                 {referrals.map(rf => (
-                  <div key={rf.id} className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-100 dark:border-slate-800 flex items-start justify-between text-xs transition hover:border-indigo-200">
+                  <div key={rf.id} className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-100 dark:border-slate-800 flex items-start justify-between text-xs transition hover:border-emerald-200">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-slate-900 dark:text-white">{rf.patientName}</span>
                         <ArrowRight className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
-                        <span className="font-bold text-indigo-700 dark:text-indigo-400">{rf.targetSpecialty}</span>
+                        <span className="font-bold text-emerald-700 dark:text-emerald-400">{rf.targetSpecialty}</span>
                       </div>
                       <p className="text-slate-500 dark:text-slate-400 text-[11px] font-medium italic mt-1">"{rf.reason}"</p>
                       <p className="text-[9px] text-slate-400 dark:text-slate-500 mt-2">Dispatched sequence: {rf.date}</p>
                     </div>
 
-                    <span className="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/40 text-indigo-700 dark:text-indigo-300 font-bold px-2.5 py-1 text-[9px] rounded-full shrink-0">
+                    <span className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-300 font-bold px-2.5 py-1 text-[9px] rounded-full shrink-0">
                       {rf.status}
                     </span>
                   </div>
@@ -718,79 +694,6 @@ export default function ProviderLayout({
 
           </div>
         )}
-
-        {/* TAB 5: EHR AI Co-Pilot summarizes, medicines references */}
-        {activeTab === 'copilot' && (
-          <div className="bg-slate-950 text-white rounded-2xl p-6 h-[480px] flex flex-col justify-between overflow-hidden border border-slate-900">
-            <div className="p-3 border-b border-indigo-900/30 flex justify-between items-center bg-slate-900/30 shrink-0">
-              <div className="flex items-center gap-3">
-                <Brain className="w-5 h-5 text-indigo-500 animate-pulse" />
-                <div>
-                  <h4 className="font-bold text-xs text-slate-200">EHR Clinician co-pilot</h4>
-                  <p className="text-[9px] text-indigo-400">Assists in telemetry syntheses, draft notices, drug interaction lookups</p>
-                </div>
-              </div>
-              <span className="text-[9px] bg-indigo-500/10 text-indigo-400 px-2.5 py-0.5 rounded font-bold">Encrypted Mode</span>
-            </div>
-
-            {/* history dialog */}
-            <div className="flex-1 p-4 overflow-y-auto space-y-4 font-mono text-[11px] leading-relaxed">
-              {aiChat.map(m => (
-                <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`p-3.5 rounded-xl max-w-xl ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-slate-900 text-indigo-200 border-l-2 border-indigo-500'}`}>
-                    <p className="text-[8px] opacity-60 font-sans uppercase mb-1">{m.role === 'user' ? 'Dr. Aris Clinician prompt' : 'EHR AI response summary'}</p>
-                    <p className="whitespace-pre-line">{m.content}</p>
-                  </div>
-                </div>
-              ))}
-              {isAiTyping && (
-                <div className="bg-slate-900 p-3 rounded-lg text-slate-400 animate-pulse text-[10px] w-56">
-                  Co-pilot auditing telemetry notes...
-                </div>
-              )}
-            </div>
-
-            {/* quick suggestions prompts */}
-            <div className="px-4 py-2 border-t border-indigo-950 flex flex-wrap gap-1.5 shrink-0">
-              <button 
-                onClick={() => onSendAIChat(`Create clinical report summary for hypertension patient ${selectedPatientData.name} based on BP trend measurements`)}
-                className="bg-slate-900 hover:bg-slate-800 text-[9px] font-bold py-1 px-2.5 rounded border border-indigo-500/20 text-indigo-300"
-              >
-                Draft {selectedPatientData.name} report
-              </button>
-              <button 
-                onClick={() => onSendAIChat('Audit drug interaction details: Lisinopril for high systolic BP values paired with metabolic nutrition guidance')}
-                className="bg-slate-900 hover:bg-slate-800 text-[9px] font-bold py-1 px-2.5 rounded border border-indigo-500/20 text-indigo-300"
-              >
-                BP Drug interaction summary
-              </button>
-            </div>
-
-            {/* form query */}
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              const input = document.getElementById('prov-copilot-input') as HTMLInputElement;
-              if (input && input.value.trim()) {
-                onSendAIChat(input.value.trim());
-                input.value = '';
-              }
-            }} className="p-3 border-t border-indigo-950 flex gap-2 shrink-0">
-              <input 
-                id="prov-copilot-input"
-                type="text" 
-                placeholder="Ask EHR co-pilot (e.g. 'Draft outpatient email explaining diastolic target range')..."
-                className="flex-1 bg-slate-900 rounded-xl px-4 py-2 text-xs text-white focus:outline-none"
-              />
-              <button 
-                type="submit" 
-                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1 shrink-0"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Consult AI</span>
-              </button>
-            </form>
-          </div>
-          )}
           </motion.div>
         </AnimatePresence>
       </div>

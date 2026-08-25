@@ -12,13 +12,14 @@ import {
 
 import { 
   AppUser, HealthLog, Conversation, CMSArticle, FAQ, Announcement, AuditLog, AIChatMessage,
-  ProviderInfo, AhomkaEntry, CommunityMessage, AppointmentBooking, SupportForumBoard
+  ProviderInfo, AhomkaEntry, CommunityMessage, AppointmentBooking, SupportForumBoard 
 } from './types';
 import { 
   defaultLogs, defaultConvs, defaultArticles, defaultUsers, defaultFAQs, defaultAnnouncements, defaultAuditLogs,
   defaultProviders, defaultAhomkaEntries, defaultCommunityMessages, defaultForumBoards,
   defaultWeeklyComplaints, defaultEngagementData, WeeklyComplaint, EngagementDataPoint
 } from './data';
+import { formatUserId, generateUserId, getUserDemographics } from './utils/userId';
 
 import PortalLogin from './components/PortalLogin';
 import PatientLayout from './components/PatientLayout';
@@ -41,12 +42,19 @@ export default function App() {
     const saved = localStorage.getItem('curaflow_users');
     let list: AppUser[] = saved ? JSON.parse(saved) : [];
     
-    // Ensure Eddy Boltzmann is always registered as admin
+    // Ensure Eddy Boltzmann is always registered as super admin with #0001 ID
     const eddyExists = list.some(u => u.email.toLowerCase() === 'eddyboltzmann@gmail.com');
     if (!eddyExists) {
       const freshEddy: AppUser = {
-        id: 'usr-4',
+        id: '0001',
+        userId: '0001',
         name: 'Eddy Boltzmann',
+        firstName: 'Eddy',
+        lastName: 'Boltzmann',
+        sex: 'Male',
+        gender: 'Male',
+        dob: '1985-04-12',
+        age: 41,
         email: 'eddyboltzmann@gmail.com',
         role: 'admin',
         status: 'Active',
@@ -58,12 +66,19 @@ export default function App() {
       list.push(freshEddy);
     }
 
-    // Ensure user's active session email eddy2062006@gmail.com is also bootstrapped as admin
+    // Ensure user's active session email eddy2062006@gmail.com is also bootstrapped as admin with #0002 ID
     const userEddyExists = list.some(u => u.email.toLowerCase() === 'eddy2062006@gmail.com');
     if (!userEddyExists) {
       const freshUserEddy: AppUser = {
-        id: 'usr-5',
+        id: '0002',
+        userId: '0002',
         name: 'Eddy Boltzmann',
+        firstName: 'Eddy',
+        lastName: 'Boltzmann',
+        sex: 'Male',
+        gender: 'Male',
+        dob: '1985-04-12',
+        age: 41,
         email: 'eddy2062006@gmail.com',
         role: 'admin',
         status: 'Active',
@@ -74,6 +89,24 @@ export default function App() {
       };
       list.push(freshUserEddy);
     }
+
+    // Standardize all existing and loaded user IDs to strict 0001-9999 format and demographic fields
+    list = list.map((u, idx) => {
+      const formattedId = formatUserId(u.id, idx + 1);
+      const demo = getUserDemographics(u);
+      return {
+        ...u,
+        id: formattedId,
+        userId: formattedId,
+        firstName: demo.firstName,
+        lastName: demo.lastName,
+        name: demo.fullName || u.name,
+        sex: demo.sex,
+        gender: demo.sex,
+        dob: demo.dob,
+        age: demo.age || u.age
+      };
+    });
 
     if (!eddyExists || !userEddyExists) {
       localStorage.setItem('curaflow_users', JSON.stringify(list));
@@ -87,12 +120,25 @@ export default function App() {
   const [session, setSession] = useState<AppUser | null>(() => {
     const saved = localStorage.getItem('curaflow_session');
     if (saved) {
-      const parsed = JSON.parse(saved);
+      const parsed: AppUser = JSON.parse(saved);
       if (parsed.email?.toLowerCase() === 'carl.admin@curaflow.com' || parsed.name?.toLowerCase().includes('carl peterson')) {
         localStorage.removeItem('curaflow_session');
         return null;
       }
-      return parsed;
+      const formattedId = formatUserId(parsed.id, 1);
+      const demo = getUserDemographics(parsed);
+      return {
+        ...parsed,
+        id: formattedId,
+        userId: formattedId,
+        firstName: demo.firstName,
+        lastName: demo.lastName,
+        name: demo.fullName || parsed.name,
+        sex: demo.sex,
+        gender: demo.sex,
+        dob: demo.dob,
+        age: demo.age || parsed.age
+      };
     }
     return null;
   });
@@ -119,7 +165,15 @@ export default function App() {
 
   const [faqs, setFaqs] = useState<FAQ[]>(() => {
     const saved = localStorage.getItem('curaflow_faqs');
-    return saved ? JSON.parse(saved) : [];
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {
+        // Fallback to default
+      }
+    }
+    return defaultFAQs;
   });
 
   const [announcements, setAnnouncements] = useState<Announcement[]>(() => {
@@ -140,9 +194,7 @@ export default function App() {
 
   const [aiChat, setAIChat] = useState<AIChatMessage[]>(() => {
     const saved = localStorage.getItem('curaflow_aichat');
-    return saved ? JSON.parse(saved) : [
-      { id: 'start', role: 'assistant', content: 'Hello! I am your CFL Health AI health assistant. I can review your recorded biometric diaries (blood pressure, glucose levels, heart rate) to yield insights. What biometric question can I answer today?', timestamp: '08:00 AM' }
-    ];
+    return saved ? JSON.parse(saved) : [];
   });
 
   const [providers, setProviders] = useState<ProviderInfo[]>(() => {
@@ -197,10 +249,6 @@ export default function App() {
   // Dynamic status toast alerts
   const [toasts, setToasts] = useState<{ id: string; text: string; type: 'success' | 'info' | 'error' }[]>([]);
 
-  // Recommendation 2: HIPAA Security Inactivity Session Guard
-  const [idleSeconds, setIdleSeconds] = useState<number>(0);
-  const SECURE_TIMEOUT_SECONDS = 300; // 5-minute HIPAA inactivity cutoff (warning triggers at last 30 seconds)
-
   // Supabase Database Connection & Sync states
   const [dbStatus, setDbStatus] = useState<'connecting' | 'synced' | 'local'>('connecting');
   const [dbInitialized, setDbInitialized] = useState<boolean>(false);
@@ -216,7 +264,7 @@ export default function App() {
 
   // Active pristine baseline local storage purge
   useEffect(() => {
-    const hasPurged = localStorage.getItem('curaflow_pristine_v5_purged');
+    const hasPurged = localStorage.getItem('curaflow_pristine_v6_purged');
     if (!hasPurged) {
       localStorage.removeItem('curaflow_users');
       localStorage.removeItem('curaflow_logs');
@@ -228,7 +276,7 @@ export default function App() {
       localStorage.removeItem('curaflow_community_messages');
       localStorage.removeItem('curaflow_weekly_complaints');
       localStorage.removeItem('curaflow_engagement_data');
-      localStorage.setItem('curaflow_pristine_v5_purged', 'true');
+      localStorage.setItem('curaflow_pristine_v6_purged', 'true');
       window.location.reload();
     }
   }, []);
@@ -347,49 +395,6 @@ export default function App() {
 
     initDatabaseSync();
   }, []);
-
-  // Recommendation 2: HIPAA Security Inactivity Hook
-  useEffect(() => {
-    // Patient side does not enforce auto-logout under recent rules
-    if (!session || session.role === 'patient') {
-      setIdleSeconds(0);
-      return;
-    }
-
-    const resetTimer = () => {
-      setIdleSeconds(0);
-    };
-
-    // Listeners for active user engagement
-    window.addEventListener('mousemove', resetTimer);
-    window.addEventListener('mousedown', resetTimer);
-    window.addEventListener('keypress', resetTimer);
-    window.addEventListener('scroll', resetTimer);
-    window.addEventListener('touchstart', resetTimer);
-
-    // Dynamic 1-second ticks
-    const interval = setInterval(() => {
-      setIdleSeconds(prev => {
-        const next = prev + 1;
-        if (next >= SECURE_TIMEOUT_SECONDS) {
-          clearInterval(interval);
-          // Auto session lock out under security guidelines
-          handleLogout('HIPAA Security Safeguard: Your session was locked due to 5 minutes of inactivity.');
-          return 0;
-        }
-        return next;
-      });
-    }, 1000);
-
-    return () => {
-      window.removeEventListener('mousemove', resetTimer);
-      window.removeEventListener('mousedown', resetTimer);
-      window.removeEventListener('keypress', resetTimer);
-      window.removeEventListener('scroll', resetTimer);
-      window.removeEventListener('touchstart', resetTimer);
-      clearInterval(interval);
-    };
-  }, [session]);
 
   // Run diagnostic check manually from Database Connection dashboard widget
   const handleTestDbConnection = async () => {
@@ -757,9 +762,13 @@ export default function App() {
     pulse?: number,
     feeling?: string,
     medicationAdherence?: string,
-    readings?: { systolic: number; diastolic: number; pulse: number }[]
+    readings?: { systolic: number; diastolic: number; pulse: number }[],
+    targetPatientId?: string,
+    customDate?: string
   ) => {
     if (!session) return;
+    const targetId = targetPatientId || session.id;
+    const targetUser = users.find(u => u.id === targetId) || session;
     
     // Comfort level score formula: higher mood, lower stress & physical pain level
     const moodFactor = mood * 10;
@@ -767,12 +776,24 @@ export default function App() {
     const painFactor = (10 - painLevel) * 10;
     const comfortScore = Math.round((moodFactor + stressFactor + painFactor) / 3);
 
-    // Format highly polished timestamp as MM/DD/YYYY or similar
-    const todayStr = new Date().toLocaleDateString('en-US');
+    // Format highly polished timestamp as MM/DD/YYYY or custom allocated date
+    let dateStr = new Date().toLocaleDateString('en-US');
+    if (customDate && customDate.trim()) {
+      const parsedDate = new Date(customDate);
+      if (!isNaN(parsedDate.getTime())) {
+        dateStr = parsedDate.toLocaleDateString('en-US');
+      } else {
+        dateStr = customDate.trim();
+      }
+    }
+
+    const targetDemo = getUserDemographics(targetUser);
+    const formattedUserId = formatUserId(targetUser.id || targetId);
 
     const newEntry: AhomkaEntry = {
       id: `e-${Date.now()}-${Math.floor(Math.random() * 1000000)}`,
-      timestamp: todayStr,
+      timestamp: dateStr,
+      dateOfReading: dateStr,
       mood,
       stress,
       painLevel,
@@ -785,7 +806,12 @@ export default function App() {
       feeling,
       medicationAdherence,
       readings,
-      patientId: session.id
+      patientId: targetId,
+      userId: formattedUserId,
+      firstName: targetDemo.firstName,
+      lastName: targetDemo.lastName,
+      sex: targetDemo.sex,
+      dob: targetDemo.dob
     };
 
     setAhomkaEntries(prev => [newEntry, ...prev]);
@@ -797,7 +823,7 @@ export default function App() {
       const complianceSuffix = medicationAdherence ? ` Medication: ${medicationAdherence}` : '';
       const logNotes = `${notes}${pulseSuffix}${complianceSuffix}`;
       
-      handleAddLog('Blood Pressure', bpValue, logNotes);
+      handleAddLog('Blood Pressure', bpValue, logNotes, targetId);
     }
 
     dispatchAuditLog(
@@ -805,7 +831,7 @@ export default function App() {
       session.name,
       session.role,
       'Log Ahomka Ho Check-in',
-      `Logged daily relief index: ${comfortScore}%. BP: ${systolic || 'N/A'}/${diastolic || 'N/A'}. Stress: ${stress}/10, Pain: ${painLevel}/10`
+      `Logged daily relief index for ${targetUser.name}: ${comfortScore}%. BP: ${systolic || 'N/A'}/${diastolic || 'N/A'}. Stress: ${stress}/10, Pain: ${painLevel}/10`
     );
   };
 
@@ -880,8 +906,10 @@ export default function App() {
   };
 
   // Clinical Logs addition - Evaluates risk standings automatically
-  const handleAddLog = (metric: any, value: string, notes: string) => {
+  const handleAddLog = (metric: any, value: string, notes: string, targetPatientId?: string) => {
     if (!session) return;
+    const targetId = targetPatientId || session.id;
+    const targetUser = users.find(u => u.id === targetId) || session;
 
     // Direct clinical parameters baseline thresholds
     let isHighRisk = false;
@@ -901,16 +929,27 @@ export default function App() {
       if (num < 5.5) isHighRisk = true;
     }
 
+    const targetDemo = getUserDemographics(targetUser);
+    const formattedUserId = formatUserId(targetUser.id || targetId);
+    const dateOfReading = new Date().toISOString();
+
     const newLog: HealthLog = {
        id: `log-${Date.now()}-${Math.floor(Math.random() * 1000000)}`,
        timestamp: new Date().toLocaleDateString('en-US') + ' ' + new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+       dateOfReading,
        metric,
        value,
        trend: isHighRisk ? 'Elevated' : 'Stable',
-       verifiedBy: session.role === 'provider' ? session.name : 'Self Logged',
+       verifiedBy: session.role === 'admin' ? `Admin (${session.name})` : session.role === 'provider' ? session.name : 'Self Logged',
+       patientId: targetId,
+       userId: formattedUserId,
+       patientName: targetUser.name,
+       firstName: targetDemo.firstName,
+       lastName: targetDemo.lastName,
+       sex: targetDemo.sex,
+       dob: targetDemo.dob,
        notes,
-       isHighRisk,
-       patientId: session.id
+       isHighRisk
      };
 
     setLogs(prev => [newLog, ...prev]);
@@ -919,9 +958,9 @@ export default function App() {
       session.name,
       session.role,
       'Add Biometric Log',
-      `Registered ${metric} of ${value}. Alert standing: ${isHighRisk ? 'High Alert' : 'Normal'}`
+      `Registered ${metric} of ${value} for ${targetUser.name}. Alert standing: ${isHighRisk ? 'High Alert' : 'Normal'}`
     );
-    triggerToast(`${metric} biometric log recorded.`, isHighRisk ? 'error' : 'success');
+    triggerToast(`${metric} biometric log recorded for ${targetUser.name}.`, isHighRisk ? 'error' : 'success');
   };
 
   const handleDeleteLog = (id: string) => {
@@ -1195,10 +1234,10 @@ export default function App() {
             initial={{ opacity: 1 }}
             exit={{ opacity: 0, y: -40 }}
             transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed inset-0 z-[99999] flex flex-col items-center justify-center bg-slate-950 text-white selection:bg-indigo-500/30 select-none overflow-hidden"
+            className="fixed inset-0 z-[99999] flex flex-col items-center justify-center bg-slate-950 text-white selection:bg-emerald-500/30 select-none overflow-hidden"
           >
             {/* Ambient glows behind the content */}
-            <div className="absolute top-1/4 -left-1/4 w-[500px] h-[500px] bg-indigo-600/10 rounded-full filter blur-[120px] pointer-events-none animate-pulse"></div>
+            <div className="absolute top-1/4 -left-1/4 w-[500px] h-[500px] bg-emerald-600/10 rounded-full filter blur-[120px] pointer-events-none animate-pulse"></div>
             <div className="absolute bottom-1/4 -right-1/4 w-[500px] h-[500px] bg-emerald-600/5 rounded-full filter blur-[120px] pointer-events-none animate-pulse"></div>
             
             {/* Subtle grid backdrop */}
@@ -1212,7 +1251,7 @@ export default function App() {
                 <motion.div 
                   animate={{ scale: [1, 1.15, 1], opacity: [0.15, 0.35, 0.15] }}
                   transition={{ repeat: Infinity, duration: 3.5, ease: "easeInOut" }}
-                  className="absolute w-36 h-36 bg-indigo-500/20 rounded-full blur-xl"
+                  className="absolute w-36 h-36 bg-emerald-500/20 rounded-full blur-xl"
                 />
                 {/* Middle pulsing ring */}
                 <motion.div 
@@ -1226,15 +1265,15 @@ export default function App() {
                   initial={{ scale: 0.8, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ duration: 0.75, ease: [0.16, 1, 0.3, 1] }}
-                  className="relative w-24 h-24 bg-gradient-to-tr from-slate-900 to-indigo-950 p-[1px] rounded-3xl shadow-3xl shadow-indigo-500/35 border border-indigo-500/40 flex items-center justify-center"
+                  className="relative w-24 h-24 bg-gradient-to-tr from-slate-900 to-emerald-950 p-[1px] rounded-3xl shadow-3xl shadow-emerald-500/35 border border-emerald-500/40 flex items-center justify-center"
                 >
                   {/* Embedded Glowing Icon Grid */}
-                  <div className="absolute inset-1.5 bg-gradient-to-br from-indigo-950 to-slate-950 rounded-[22px] flex items-center justify-center overflow-hidden">
+                  <div className="absolute inset-1.5 bg-gradient-to-br from-emerald-950 to-slate-950 rounded-[22px] flex items-center justify-center overflow-hidden">
                     <div className="absolute inset-0 bg-[radial-gradient(#10b981_1px,transparent_1px)] [background-size:8px_8px] opacity-20"></div>
                     <motion.div
                       animate={{ rotate: 360 }}
                       transition={{ repeat: Infinity, duration: 25, ease: "linear" }}
-                      className="absolute -inset-10 bg-gradient-to-tr from-transparent via-indigo-500/10 to-transparent blur-md pointer-events-none"
+                      className="absolute -inset-10 bg-gradient-to-tr from-transparent via-emerald-500/10 to-transparent blur-md pointer-events-none"
                     />
                     <Activity className="w-10 h-10 text-emerald-400 filter drop-shadow-[0_0_10px_rgba(16,185,129,0.6)]" />
                   </div>
@@ -1250,7 +1289,7 @@ export default function App() {
               >
                 <h1 className="text-3xl font-black tracking-tight text-white flex items-center justify-center gap-1.5 font-sans">
                   <span>CuraFlow</span>
-                  <span className="text-indigo-400 font-light font-sans">Health</span>
+                  <span className="text-emerald-400 font-light font-sans">Health</span>
                 </h1>
                 <p className="text-[10px] sm:text-[10.5px] font-mono tracking-widest text-slate-400 font-bold uppercase leading-none">
                   Production EHR & Clinical Care Suite
@@ -1267,7 +1306,7 @@ export default function App() {
                 {/* Progress track background */}
                 <div className="w-full h-[3px] bg-slate-900 rounded-full overflow-hidden border border-slate-800/40 relative">
                   <motion.div 
-                    className="h-full bg-gradient-to-r from-indigo-500 via-indigo-400 to-emerald-400 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.5)]"
+                    className="h-full bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-400 rounded-full shadow-[0_0_8px_rgba(99,102,241,0.5)]"
                     style={{ width: `${splashProgress}%` }}
                     transition={{ ease: "easeInOut" }}
                   />
@@ -1308,14 +1347,14 @@ export default function App() {
                 t.type === 'error' 
                   ? 'bg-red-50/95 dark:bg-rose-950/95 text-red-900 dark:text-rose-100 border-red-200 dark:border-rose-900/50 shadow-red-500/5' 
                   : t.type === 'info' 
-                    ? 'bg-indigo-50/95 dark:bg-indigo-950/95 text-indigo-900 dark:text-indigo-100 border-indigo-200 dark:border-indigo-900/50 shadow-indigo-500/5' 
+                    ? 'bg-emerald-50/95 dark:bg-emerald-950/95 text-emerald-900 dark:text-emerald-100 border-emerald-200 dark:border-emerald-900/50 shadow-emerald-500/5' 
                     : 'bg-emerald-50/95 dark:bg-emerald-950/95 text-emerald-900 dark:text-emerald-100 border-emerald-200 dark:border-emerald-900/50 shadow-emerald-500/5'
               }`}
             >
               {t.type === 'error' ? (
                 <ShieldAlert className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
               ) : t.type === 'info' ? (
-                <Info className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+                <Info className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
               ) : (
                 <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
               )}
@@ -1327,15 +1366,15 @@ export default function App() {
 
       {/* Global Admin Broadcast warning marquee banner */}
       {platformBroadcastMsg && (
-        <div id="broadcast-alert-banner" className="bg-[#581C87] text-white py-3.5 px-6 shrink-0 flex items-center justify-between text-xs font-semibold relative overflow-hidden animate-fade-in border-b border-purple-950 shadow-lg">
-          <div className="absolute inset-0 bg-[#701A75] opacity-15 pointer-events-none hover:scale-105 duration-200"></div>
+        <div id="broadcast-alert-banner" className="bg-slate-950 text-white py-3.5 px-6 shrink-0 flex items-center justify-between text-xs font-semibold relative overflow-hidden animate-fade-in border-b border-slate-800 shadow-lg">
+          <div className="absolute inset-0 bg-slate-900 opacity-15 pointer-events-none hover:scale-105 duration-200"></div>
           <div className="relative flex items-center gap-3">
             <span className="bg-red-500 text-white font-black text-[9px] px-2 py-0.5 rounded-full animate-pulse uppercase">EMERGENCY NOTICE</span>
             <p className="pr-12">{platformBroadcastMsg}</p>
           </div>
           <button 
             onClick={() => setPlatformBroadcastMsg(null)}
-            className="text-white hover:text-rose-250 p-1 bg-white/10 rounded-full hover:bg-white/20 transition shrink-0"
+            className="text-white hover:text-teal-200 p-1 bg-white/10 rounded-full hover:bg-white/20 transition shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
@@ -1348,38 +1387,40 @@ export default function App() {
       {session && (
         <header className="h-14 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-2.5 min-[375px]:px-4 sm:px-6 flex items-center justify-between shrink-0 font-sans select-none overflow-hidden">
           <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-            <div className="px-1.5 py-0.5 sm:px-2 bg-indigo-600 rounded-lg flex items-center justify-center text-white text-[10px] sm:text-xs font-black shadow-lg">
+            <div className="px-1.5 py-0.5 sm:px-2 bg-emerald-600 rounded-lg flex items-center justify-center text-white text-[10px] sm:text-xs font-black shadow-lg">
               CFL
             </div>
             <span className="font-display font-medium text-slate-900 dark:text-white font-sans hidden min-[350px]:inline text-xs sm:text-sm">CuraFlow</span>
           </div>
 
           <div className="flex items-center gap-1.5 min-[375px]:gap-2.5 sm:gap-4 overflow-hidden">
-            {/* SEARCH AREA */}
-            <div className="relative shrink">
-              <Search className="w-3 h-3 text-slate-400 dark:text-slate-500 absolute left-2 top-1/2 -translate-y-1/2" />
-              <input 
-                id="topbar-search-input"
-                type="text" 
-                placeholder="Search..." 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 py-1 px-2 pl-6 rounded-lg text-[10px] sm:text-xs w-16 min-[350px]:w-24 min-[400px]:w-32 sm:w-48 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:bg-white dark:focus:bg-slate-800 focus:outline-none transition-all"
-              />
-            </div>
+            {/* SEARCH AREA - Only rendered for non-patient administrative/provider roles */}
+            {session.role !== 'patient' && (
+              <div className="relative shrink">
+                <Search className="w-3 h-3 text-slate-400 dark:text-slate-500 absolute left-2 top-1/2 -translate-y-1/2" />
+                <input 
+                  id="topbar-search-input"
+                  type="text" 
+                  placeholder="Search..." 
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 py-1 px-2 pl-6 rounded-lg text-[10px] sm:text-xs w-16 min-[350px]:w-24 min-[400px]:w-32 sm:w-48 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:bg-white dark:focus:bg-slate-800 focus:outline-none transition-all"
+                />
+              </div>
+            )}
 
             {/* active user details */}
             <div className="flex items-center gap-1.5 shrink-0">
               {session.avatar ? (
-                <img src={session.avatar} alt="avatar" className="w-6 h-6 rounded-full object-cover border border-indigo-200" />
+                <img src={session.avatar} alt="avatar" className="w-6 h-6 rounded-full object-cover border border-emerald-200" />
               ) : (
-                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center text-[9px] font-black border border-indigo-200 shrink-0">
+                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-emerald-500 to-purple-600 text-white flex items-center justify-center text-[9px] font-black border border-emerald-200 shrink-0">
                   {session.name.charAt(0).toUpperCase()}
                 </div>
               )}
               <div className="hidden md:block text-left">
                 <p className="text-[11px] font-bold text-slate-800 leading-none">{session.name}</p>
-                <span className="text-[9px] uppercase font-bold text-indigo-600 tracking-wider block mt-1">{session.role} Portal</span>
+                <span className="text-[9px] uppercase font-bold text-emerald-600 tracking-wider block mt-1">{session.role} Portal</span>
               </div>
             </div>
 
@@ -1404,27 +1445,6 @@ export default function App() {
               </button>
             )}
 
-            {/* Recommendation 2: Global HIPAA Guard Inactivity Countdown Tracker */}
-            {session?.role !== 'patient' && (
-              <div 
-                id="topbar-hipaa-guard-badge"
-                className={`hidden min-[480px]:flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold border transition shrink-0 select-none ${
-                  (SECURE_TIMEOUT_SECONDS - idleSeconds) <= 30
-                    ? 'bg-rose-50 text-rose-700 border-rose-250 dark:bg-rose-950/30 dark:text-rose-400 dark:border-rose-900 animate-pulse'
-                    : 'bg-indigo-50/70 text-indigo-700 border-indigo-200/60 dark:bg-indigo-950/30 dark:text-indigo-400 dark:border-indigo-900/50'
-                }`}
-                title="Secure HIPAA Session Guard: Automatic lock triggers on 5 minutes inactivity."
-              >
-                <ShieldCheck className={`w-3 h-3 ${
-                  (SECURE_TIMEOUT_SECONDS - idleSeconds) <= 30 ? 'text-rose-600 animate-bounce' : 'text-indigo-600 dark:text-indigo-400'
-                }`} />
-                <span className="text-[9px] font-sans">HIPAA Lock:</span>
-                <span className="font-mono font-bold tracking-wider">
-                  {`${Math.floor((SECURE_TIMEOUT_SECONDS - idleSeconds) / 60).toString().padStart(2, '0')}:${((SECURE_TIMEOUT_SECONDS - idleSeconds) % 60).toString().padStart(2, '0')}`}
-                </span>
-              </div>
-            )}
-
             <button 
               id="global-logout-btn"
               onClick={() => handleLogout()}
@@ -1439,9 +1459,9 @@ export default function App() {
 
       {/* Interactive PWA Install Prompt Banner */}
       {session && showPwaPrompt && (
-        <div id="pwa-install-prompt" className="bg-indigo-50/90 dark:bg-indigo-950/45 border-b border-indigo-100/50 dark:border-indigo-900/50 px-3.5 py-2 flex flex-col min-[350px]:flex-row items-center justify-between gap-2 transition-all font-sans select-none shrink-0">
+        <div id="pwa-install-prompt" className="bg-emerald-50/90 dark:bg-emerald-950/45 border-b border-emerald-100/50 dark:border-emerald-900/50 px-3.5 py-2 flex flex-col min-[350px]:flex-row items-center justify-between gap-2 transition-all font-sans select-none shrink-0">
           <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-indigo-600 rounded-lg text-white hidden min-[400px]:block">
+            <div className="p-1.5 bg-emerald-600 rounded-lg text-white hidden min-[400px]:block">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
@@ -1457,13 +1477,13 @@ export default function App() {
                 triggerToast('CuraFlow PWA Installation activated successfully!', 'success');
                 setShowPwaPrompt(false);
               }}
-              className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg transition-all shadow-sm shadow-indigo-600/10 cursor-pointer"
+              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg transition-all shadow-sm shadow-emerald-600/10 cursor-pointer"
             >
               Install App
             </button>
             <button
               onClick={() => setShowPwaPrompt(false)}
-              className="p-1 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 text-slate-400 hover:text-slate-600 rounded transition cursor-pointer"
+              className="p-1 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-slate-400 hover:text-slate-600 rounded transition cursor-pointer"
               title="Dismiss prompt"
             >
               <X className="w-3 h-3" />
@@ -1476,88 +1496,137 @@ export default function App() {
       <main className="flex-1 overflow-hidden relative">
         <AnimatePresence mode="wait">
           {!session ? (
-            <PortalLogin 
-              users={users}
-              onLoginSuccess={handleLoginSuccess}
-              onRegisterSuccess={handleRegisterSuccess}
-              onPasswordReset={handlePasswordReset}
-            />
+            <motion.div
+              key="view-login"
+              initial={{ opacity: 0, y: 16, scale: 0.99 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -16, scale: 0.99 }}
+              transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+              className="h-full w-full flex flex-col overflow-hidden"
+            >
+              <PortalLogin 
+                users={users}
+                onLoginSuccess={handleLoginSuccess}
+                onRegisterSuccess={handleRegisterSuccess}
+                onPasswordReset={handlePasswordReset}
+              />
+            </motion.div>
           ) : session.role === 'patient' ? (
-            <PatientLayout 
-              session={session}
-              logs={logs.filter(l => l.patientId === session.id)}
-              conversations={conversations}
-              aiChat={aiChat}
-              articles={articles}
-              faqs={faqs}
-              announcements={announcements}
-              searchQuery={searchQuery}
-              onAddLog={handleAddLog}
-              onDeleteLog={handleDeleteLog}
-              onSendMessage={handleSendMessage}
-              onSendAIChat={handleSendAIChat}
-              isAiTyping={isAiTyping}
-              isDoctorTyping={isDoctorTyping}
-              onUpdateProfile={handleUpdateProfile}
-              onTriggerToast={triggerToast}
-              providers={providers}
-              ahomkaEntries={ahomkaEntries}
-              onAddAhomkaEntry={handleAddAhomkaEntry}
-              communityMessages={communityMessages}
-              onSendCommunityMessage={handleSendCommunityMessage}
-              bookings={bookings}
-              onAddBooking={handleAddBooking}
-              onCancelBooking={handleCancelBooking}
-              onDeleteMessage={handleDeleteMessage}
-              onEditMessage={handleEditMessage}
-              forumBoards={forumBoards}
-            />
+            <motion.div
+              key={`view-patient-${session.id}`}
+              initial={{ opacity: 0, y: 16, scale: 0.99 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -16, scale: 0.99 }}
+              transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+              className="h-full w-full flex flex-col overflow-hidden"
+            >
+              <PatientLayout 
+                session={session}
+                logs={logs.filter(l => l.patientId === session.id)}
+                conversations={conversations}
+                aiChat={aiChat}
+                articles={articles}
+                faqs={faqs}
+                announcements={announcements}
+                searchQuery={searchQuery}
+                onAddLog={handleAddLog}
+                onDeleteLog={handleDeleteLog}
+                onSendMessage={handleSendMessage}
+                onSendAIChat={handleSendAIChat}
+                isAiTyping={isAiTyping}
+                isDoctorTyping={isDoctorTyping}
+                onUpdateProfile={handleUpdateProfile}
+                onTriggerToast={triggerToast}
+                providers={providers}
+                ahomkaEntries={ahomkaEntries}
+                onAddAhomkaEntry={handleAddAhomkaEntry}
+                communityMessages={communityMessages}
+                onSendCommunityMessage={handleSendCommunityMessage}
+                bookings={bookings}
+                onAddBooking={handleAddBooking}
+                onCancelBooking={handleCancelBooking}
+                onDeleteMessage={handleDeleteMessage}
+                onEditMessage={handleEditMessage}
+                forumBoards={forumBoards}
+              />
+            </motion.div>
           ) : session.role === 'provider' ? (
-            <ProviderLayout 
-              session={session}
-              logs={logs}
-              conversations={conversations}
-              aiChat={aiChat}
-              users={users}
-              onAddLog={handleAddLog}
-              onSendMessage={handleSendMessage}
-              onSendAIChat={handleSendAIChat}
-              isAiTyping={isAiTyping}
-              onTriggerToast={triggerToast}
-              onChangeLogAlertStatus={handleChangeLogAlertStatus}
-              auditLogs={auditLogs}
-              loggedInUserIds={loggedInUserIds}
-            />
+            <motion.div
+              key={`view-provider-${session.id}`}
+              initial={{ opacity: 0, y: 16, scale: 0.99 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -16, scale: 0.99 }}
+              transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+              className="h-full w-full flex flex-col overflow-hidden"
+            >
+              <ProviderLayout 
+                session={session}
+                logs={logs}
+                conversations={conversations}
+                aiChat={aiChat}
+                users={users}
+                onAddLog={handleAddLog}
+                onSendMessage={handleSendMessage}
+                onSendAIChat={handleSendAIChat}
+                isAiTyping={isAiTyping}
+                onTriggerToast={triggerToast}
+                onChangeLogAlertStatus={handleChangeLogAlertStatus}
+                auditLogs={auditLogs}
+                loggedInUserIds={loggedInUserIds}
+              />
+            </motion.div>
           ) : (
-            <AdminLayout 
-              session={session}
-              users={users}
-              loggedInUserIds={loggedInUserIds}
-              onSimulateTokenRefresh={handleSimulateTokenRefresh}
-              articles={articles}
-              faqs={faqs}
-              announcements={announcements}
-              auditLogs={auditLogs}
-              logs={logs}
-              bookings={bookings}
-              ahomkaEntries={ahomkaEntries}
-              onAddArticle={handleAddArticle}
-              onArchiveArticle={handleArchiveArticle}
-              onModifyUserStatus={handleModifyUserStatus}
-              onVerifyClinician={handleVerifyClinician}
-              onAddFAQ={handleAddFAQ}
-              onDeployAnnouncement={handleDeployAnnouncement}
-              onTriggerToast={triggerToast}
-              onBroadcastPlatformNotification={handleBroadcastPlatformNotification}
-              onAddUser={handleRegisterSuccess}
-              onDeleteUser={handleDeleteUser}
-              forumBoards={forumBoards}
-              onAddForumBoard={(board: SupportForumBoard) => setForumBoards(prev => [board, ...prev])}
-              weeklyComplaints={weeklyComplaints}
-              onUpdateWeeklyComplaints={setWeeklyComplaints}
-              engagementData={engagementData}
-              onUpdateEngagementData={setEngagementData}
-            />
+            <motion.div
+              key={`view-admin-${session.id}`}
+              initial={{ opacity: 0, y: 16, scale: 0.99 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -16, scale: 0.99 }}
+              transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+              className="h-full w-full flex flex-col overflow-hidden"
+            >
+              <AdminLayout 
+                session={session}
+                users={users}
+                loggedInUserIds={loggedInUserIds}
+                onSimulateTokenRefresh={handleSimulateTokenRefresh}
+                articles={articles}
+                faqs={faqs}
+                announcements={announcements}
+                auditLogs={auditLogs}
+                logs={logs}
+                bookings={bookings}
+                ahomkaEntries={ahomkaEntries}
+                onAddArticle={handleAddArticle}
+                onArchiveArticle={handleArchiveArticle}
+                onModifyUserStatus={handleModifyUserStatus}
+                onVerifyClinician={handleVerifyClinician}
+                onAddFAQ={handleAddFAQ}
+                onDeployAnnouncement={handleDeployAnnouncement}
+                onTriggerToast={triggerToast}
+                onBroadcastPlatformNotification={handleBroadcastPlatformNotification}
+                onAddUser={(newUser: AppUser) => {
+                  const activeNewUser = { ...newUser, status: 'Active' as const, verified: true };
+                  setUsers(prev => [activeNewUser, ...prev]);
+                  dispatchAuditLog(
+                    session.id,
+                    session.name,
+                    session.role,
+                    'Admin Provisioning',
+                    `Super Admin provisioned new ${activeNewUser.role} profile: ${activeNewUser.name} (${activeNewUser.email})`
+                  );
+                  triggerToast(`Successfully registered new ${activeNewUser.role}: ${activeNewUser.name}`, 'success');
+                }}
+                onAddAhomkaEntry={handleAddAhomkaEntry}
+                onAddLog={handleAddLog}
+                onDeleteUser={handleDeleteUser}
+                forumBoards={forumBoards}
+                onAddForumBoard={(board: SupportForumBoard) => setForumBoards(prev => [board, ...prev])}
+                weeklyComplaints={weeklyComplaints}
+                onUpdateWeeklyComplaints={setWeeklyComplaints}
+                engagementData={engagementData}
+                onUpdateEngagementData={setEngagementData}
+              />
+            </motion.div>
           )}
         </AnimatePresence>
       </main>
@@ -1575,7 +1644,7 @@ export default function App() {
             </button>
 
             <div className="flex items-center gap-2.5 mb-4 font-sans">
-              <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 rounded-xl">
+              <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 rounded-xl">
                 <Database className="w-5 h-5" />
               </div>
               <div className="text-left">
@@ -1651,7 +1720,7 @@ export default function App() {
                   type="button"
                   disabled={isTestingDb}
                   onClick={handleTestDbConnection}
-                  className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-750 disabled:bg-indigo-400 text-white font-bold rounded-lg transition hover:scale-[1.01] shrink-0 text-center flex items-center justify-center gap-1 cursor-pointer font-sans text-xs"
+                  className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white font-bold rounded-lg transition hover:scale-[1.01] shrink-0 text-center flex items-center justify-center gap-1 cursor-pointer font-sans text-xs"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isTestingDb ? 'animate-spin' : ''}`} />
                   <span>{isTestingDb ? 'Querying...' : 'Test Connection'}</span>
@@ -1670,53 +1739,6 @@ export default function App() {
               <p className="text-[10px] text-slate-400 text-center leading-normal dark:text-slate-500 mt-1">
                 Active storage engines work concurrently. Any operations automatically persist to Supabase databases, with a localized browser backup providing 100% HIPAA sandbox redundancy.
               </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Recommendation 2: HIPAA Security Inactivity Alert Modal Overlay */}
-      {session && session.role !== 'patient' && (SECURE_TIMEOUT_SECONDS - idleSeconds) <= 30 && (
-        <div id="hipaa-timeout-warning-overlay" className="fixed inset-0 z-[20000] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-white dark:bg-slate-900 border-2 border-rose-500 rounded-2xl max-w-md w-full p-6 shadow-2xl relative text-slate-900 dark:text-slate-100 text-center space-y-4">
-            <div className="mx-auto w-12 h-12 bg-rose-100 dark:bg-rose-950/40 text-rose-600 rounded-full flex items-center justify-center animate-pulse">
-              <ShieldAlert className="w-6 h-6 animate-bounce" />
-            </div>
-            
-            <div className="space-y-1.5">
-              <h3 className="font-sans font-black text-sm text-slate-950 dark:text-white uppercase tracking-wider text-rose-600">
-                Inactivity Security Timeout
-              </h3>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                Under HIPAA Security Rule 45 CFR § 164.312(a)(2)(iii), clinical dashboards handling Protected Health Information must enforce secure session termination on idle timeouts.
-              </p>
-            </div>
-
-            <div className="p-4 bg-rose-50 dark:bg-rose-950/20 border border-rose-100 dark:border-rose-900 rounded-xl space-y-1 select-none">
-              <span className="text-[10px] text-rose-700 dark:text-rose-400 uppercase font-black block">Your Session Locks In:</span>
-              <span className="font-mono text-3xl font-black text-rose-600 animate-pulse tracking-widest block">
-                {SECURE_TIMEOUT_SECONDS - idleSeconds}s
-              </span>
-            </div>
-
-            <div className="flex gap-2.5 pt-1">
-              <button
-                type="button"
-                onClick={() => handleLogout('Session secured. Active clinician profiles cleared safely.')}
-                className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-lg text-xs transition cursor-pointer"
-              >
-                Clear & Log Out
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setIdleSeconds(0);
-                  triggerToast('Clinical session credentials renewed!', 'success');
-                }}
-                className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-750 text-white font-bold rounded-lg text-xs transition shadow-md shadow-indigo-600/15 cursor-pointer"
-              >
-                Keep Me Logged In
-              </button>
             </div>
           </div>
         </div>

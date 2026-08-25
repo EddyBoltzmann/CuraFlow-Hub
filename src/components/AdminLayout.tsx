@@ -3,21 +3,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   CMSArticle, AppUser, FAQ, Announcement, AuditLog, HealthLog, AppointmentBooking, AhomkaEntry, SupportForumBoard 
 } from '../types';
 import { jsPDF } from 'jspdf';
+import * as XLSX from 'xlsx';
 import { WeeklyComplaint, EngagementDataPoint } from '../data';
 import { 
   Activity, Users, FileText, HelpCircle, Bell, Settings, Plus, Trash2, 
   Check, ShieldAlert, Sparkles, AlertTriangle, Play, Info, EyeOff, Layout, Globe, Server, Download, RefreshCw, TrendingUp,
-  MapPin, Shield, GraduationCap, Briefcase, Stethoscope, Database, UserCheck, X
+  MapPin, Shield, GraduationCap, Briefcase, Stethoscope, Database, UserCheck, X, HeartPulse, Filter, User
 } from 'lucide-react';
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, BarChart, Bar
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, BarChart, Bar, ReferenceLine, ReferenceArea
 } from 'recharts';
+import { generateUserId, formatUserId, getUserDemographics } from '../utils/userId';
 
 interface AdminLayoutProps {
   session: AppUser;
@@ -47,12 +49,152 @@ interface AdminLayoutProps {
   onUpdateWeeklyComplaints: React.Dispatch<React.SetStateAction<WeeklyComplaint[]>>;
   engagementData: EngagementDataPoint[];
   onUpdateEngagementData: React.Dispatch<React.SetStateAction<EngagementDataPoint[]>>;
+  onAddAhomkaEntry?: (
+    mood: number,
+    stress: number,
+    painLevel: number,
+    symptoms: string[],
+    notes: string,
+    systolic?: number,
+    diastolic?: number,
+    pulse?: number,
+    feeling?: string,
+    medicationAdherence?: string,
+    readings?: { systolic: number; diastolic: number; pulse: number }[],
+    targetPatientId?: string,
+    customDate?: string
+  ) => void;
+  onAddLog?: (metric: any, value: string, notes: string, targetPatientId?: string) => void;
 }
+
+const BloodPressureCustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0]?.payload;
+    if (!data) return null;
+
+    const sysDiff = data.systolic - 120;
+    const diaDiff = data.diastolic - 80;
+
+    let stageBadgeStyle = 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+    if (data.stage === 'Hypertensive Crisis' || data.systolic >= 180 || data.diastolic >= 120) {
+      stageBadgeStyle = 'bg-rose-600/30 text-rose-200 border-rose-500/60 animate-pulse';
+    } else if (data.stage === 'Stage 2 Hypertension' || data.isHighRisk) {
+      stageBadgeStyle = 'bg-rose-500/20 text-rose-300 border-rose-500/40';
+    } else if (data.stage === 'Stage 1 Hypertension') {
+      stageBadgeStyle = 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+    } else if (data.stage === 'Elevated') {
+      stageBadgeStyle = 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40';
+    }
+
+    const formattedId = data.userId ? formatUserId(data.userId) : (data.patientId ? formatUserId(data.patientId) : '0001');
+
+    return (
+      <div className="bg-slate-950/95 text-slate-100 border border-slate-700/80 rounded-2xl p-4 shadow-2xl space-y-3 text-left font-sans min-w-[280px] max-w-[340px] backdrop-blur-xl ring-1 ring-white/10">
+        {/* Header with Timestamp & Stage Badge */}
+        <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 gap-2">
+          <div className="flex items-center gap-1.5 text-[10.5px] font-bold text-slate-300 font-mono">
+            <HeartPulse className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <span>{data.displayDate || data.fullTimestamp || label}</span>
+          </div>
+          <span className={`text-[9px] px-2.5 py-0.5 rounded-full font-black uppercase tracking-wider border ${stageBadgeStyle}`}>
+            {data.stage || (data.isHighRisk ? 'High Risk' : 'Normal')}
+          </span>
+        </div>
+
+        {/* Patient Identity & User ID */}
+        <div className="bg-slate-900/80 rounded-xl p-2.5 border border-slate-800/80 space-y-1.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <User className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="text-xs font-bold text-white tracking-tight truncate max-w-[170px]">
+                {data.firstName && data.lastName ? `${data.firstName} ${data.lastName}` : (data.patientName || 'Patient')}
+              </span>
+            </div>
+            <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-500/30">
+              ID: #{formattedId}
+            </span>
+          </div>
+
+          {/* Demographic Metadata: Sex, DOB, Date of Reading */}
+          <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[9.5px] text-slate-300 font-mono pt-1 border-t border-slate-800/60">
+            <div>
+              <span className="text-slate-500 uppercase font-semibold">Sex: </span>
+              <span className="text-slate-200 font-bold">{data.sex || 'Unspecified'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500 uppercase font-semibold">DOB: </span>
+              <span className="text-slate-200 font-bold">{data.dob || 'Unspecified'}</span>
+            </div>
+            <div className="col-span-2 text-[9px] text-slate-400 truncate">
+              <span className="text-slate-500 uppercase font-semibold">Reading Taken: </span>
+              <span className="text-slate-300 font-medium">{data.dateOfReading || data.fullTimestamp || 'Recent'}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Dual Vital Metric Cards: Systolic & Diastolic */}
+        <div className="grid grid-cols-2 gap-2.5 pt-1 text-xs">
+          {/* Systolic Box */}
+          <div className="bg-rose-950/40 border border-rose-800/40 rounded-xl p-2.5 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] uppercase font-bold text-rose-400 tracking-wider">Systolic</span>
+              <span className={`text-[8.5px] font-mono font-bold ${data.systolic >= 140 ? 'text-rose-400' : 'text-slate-400'}`}>
+                {data.systolic >= 140 ? 'HIGH' : 'OK'}
+              </span>
+            </div>
+            <div className="flex items-baseline gap-1">
+              <span className="font-mono text-xl font-black text-white tracking-tight">{data.systolic}</span>
+              <span className="text-[10px] text-rose-300 font-mono font-medium">mmHg</span>
+            </div>
+            <p className="text-[8.5px] text-slate-400 font-mono">
+              {sysDiff > 0 ? `+${sysDiff} vs normal (120)` : `${sysDiff} vs normal (120)`}
+            </p>
+          </div>
+
+          {/* Diastolic Box */}
+          <div className="bg-blue-950/40 border border-blue-800/40 rounded-xl p-2.5 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] uppercase font-bold text-blue-400 tracking-wider">Diastolic</span>
+              <span className={`text-[8.5px] font-mono font-bold ${data.diastolic >= 90 ? 'text-rose-400' : 'text-slate-400'}`}>
+                {data.diastolic >= 90 ? 'HIGH' : 'OK'}
+              </span>
+            </div>
+            <div className="flex items-baseline gap-1">
+              <span className="font-mono text-xl font-black text-white tracking-tight">{data.diastolic}</span>
+              <span className="text-[10px] text-blue-300 font-mono font-medium">mmHg</span>
+            </div>
+            <p className="text-[8.5px] text-slate-400 font-mono">
+              {diaDiff > 0 ? `+${diaDiff} vs normal (80)` : `${diaDiff} vs normal (80)`}
+            </p>
+          </div>
+        </div>
+
+        {/* Supplementary Medical Telemetry */}
+        <div className="flex items-center justify-between pt-1 border-t border-slate-800/80 text-[10px] text-slate-400 font-mono">
+          <span>MAP: <strong className="text-slate-200 font-bold">{data.map} mmHg</strong></span>
+          {data.pulse ? (
+            <span>Pulse: <strong className="text-emerald-400 font-bold">{data.pulse} bpm</strong></span>
+          ) : (
+            <span className="text-slate-500">Pulse: N/A</span>
+          )}
+        </div>
+
+        {/* Clinical Note Excerpt if Available */}
+        {data.notes && (
+          <div className="pt-1.5 border-t border-slate-800/80 text-[10px] text-slate-400 italic line-clamp-2">
+            "{data.notes}"
+          </div>
+        )}
+      </div>
+    );
+  }
+  return null;
+};
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-slate-900/95 dark:bg-slate-950/95 border border-slate-800 text-white rounded-xl p-3 shadow-2xl space-y-1.5 text-left border-l-4 border-l-indigo-600 font-sans min-w-[170px]">
+      <div className="bg-slate-900/95 dark:bg-slate-950/95 border border-slate-800 text-white rounded-xl p-3 shadow-2xl space-y-1.5 text-left border-l-4 border-l-emerald-600 font-sans min-w-[170px]">
         <div className="text-[10px] text-slate-400 uppercase font-bold tracking-wider font-mono">
           {label}
         </div>
@@ -79,7 +221,8 @@ export default function AdminLayout({
   onAddArticle, onArchiveArticle, onModifyUserStatus, onVerifyClinician,
   onAddFAQ, onDeployAnnouncement, onTriggerToast, onBroadcastPlatformNotification,
   onAddUser, onDeleteUser, forumBoards, onAddForumBoard,
-  weeklyComplaints, onUpdateWeeklyComplaints, engagementData, onUpdateEngagementData
+  weeklyComplaints, onUpdateWeeklyComplaints, engagementData, onUpdateEngagementData,
+  onAddAhomkaEntry, onAddLog
 }: AdminLayoutProps) {
   
   // Dynamic complaint metrics calculations
@@ -115,6 +258,11 @@ export default function AdminLayout({
   const [selectedProfileUser, setSelectedProfileUser] = useState<AppUser | null>(null);
 
   // Socio-demographic registration input states
+  const [regFirstName, setRegFirstName] = useState<string>('Ama');
+  const [regLastName, setRegLastName] = useState<string>('Serwaa');
+  const [regSex, setRegSex] = useState<string>('Female');
+  const [regDob, setRegDob] = useState<string>('1986-05-14');
+  const [regCustomUserId, setRegCustomUserId] = useState<string>('');
   const [regAge, setRegAge] = useState<string>('38');
   const [regGender, setRegGender] = useState<string>('Female');
   const [regMarital, setRegMarital] = useState<string>('Married');
@@ -139,11 +287,104 @@ export default function AdminLayout({
   const [systolicThreshold, setSystolicThreshold] = useState<number>(140);
   const [diastolicThreshold, setDiastolicThreshold] = useState<number>(90);
 
+  // Blood Pressure Longitudinal Telemetry Chart Controls
+  const [bpPatientFilter, setBpPatientFilter] = useState<string>('all');
+  const [bpTimeRange, setBpTimeRange] = useState<'7-day' | '30-day' | 'All-time'>('All-time');
+  const [showBpRefLines, setShowBpRefLines] = useState<boolean>(true);
+
   const filteredLogs = logs.filter(log => {
     if (alertFilter === 'high-risk') return log.isHighRisk === true;
     if (alertFilter === 'normal') return log.isHighRisk === false || !log.isHighRisk;
     return true;
   });
+
+  // Super Admin - Log Patient Telemetry Readings modal state (3 sequential readings & date allocation)
+  const [logReadingsPatient, setLogReadingsPatient] = useState<AppUser | null>(null);
+  const [adminLogDate, setAdminLogDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  
+  // Reading 1
+  const [adminSys1, setAdminSys1] = useState<number>(120);
+  const [adminDia1, setAdminDia1] = useState<number>(80);
+  const [adminPulse1, setAdminPulse1] = useState<number>(72);
+  
+  // Reading 2
+  const [adminSys2, setAdminSys2] = useState<number>(122);
+  const [adminDia2, setAdminDia2] = useState<number>(82);
+  const [adminPulse2, setAdminPulse2] = useState<number>(73);
+  
+  // Reading 3
+  const [adminSys3, setAdminSys3] = useState<number>(118);
+  const [adminDia3, setAdminDia3] = useState<number>(79);
+  const [adminPulse3, setAdminPulse3] = useState<number>(70);
+
+  const [readGlucose, setReadGlucose] = useState<string>('');
+  const [readMood, setReadMood] = useState<number>(8);
+  const [readStress, setReadStress] = useState<number>(3);
+  const [readPain, setReadPain] = useState<number>(1);
+  const [readSymptoms, setReadSymptoms] = useState<string[]>(['Normal / Stable']);
+  const [readAdherence, setReadAdherence] = useState<string>('Full Adherence');
+  const [readNotes, setReadNotes] = useState<string>('');
+
+  const handleSavePatientReadings = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!logReadingsPatient) return;
+
+    const s1 = Number(adminSys1) || 120;
+    const d1 = Number(adminDia1) || 80;
+    const p1 = Number(adminPulse1) || 72;
+
+    const s2 = Number(adminSys2) || 122;
+    const d2 = Number(adminDia2) || 82;
+    const p2 = Number(adminPulse2) || 73;
+
+    const s3 = Number(adminSys3) || 118;
+    const d3 = Number(adminDia3) || 79;
+    const p3 = Number(adminPulse3) || 70;
+
+    // Calculate averages mathematically
+    const avgSys = Math.round((s1 + s2 + s3) / 3);
+    const avgDia = Math.round((d1 + d2 + d3) / 3);
+    const avgPulse = Math.round((p1 + p2 + p3) / 3);
+
+    // Allocated Date formatting
+    let allocatedDateStr = new Date().toLocaleDateString('en-US');
+    if (adminLogDate) {
+      const parts = adminLogDate.split('-');
+      if (parts.length === 3) {
+        const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+        allocatedDateStr = d.toLocaleDateString('en-US');
+      }
+    }
+
+    if (onAddAhomkaEntry) {
+      onAddAhomkaEntry(
+        readMood,
+        readStress,
+        readPain,
+        readSymptoms,
+        readNotes || `Recorded by Super Admin (3-Reading Procedure, Date: ${allocatedDateStr})`,
+        avgSys,
+        avgDia,
+        avgPulse,
+        'Logged by Admin',
+        readAdherence,
+        [
+          { systolic: s1, diastolic: d1, pulse: p1 },
+          { systolic: s2, diastolic: d2, pulse: p2 },
+          { systolic: s3, diastolic: d3, pulse: p3 }
+        ],
+        logReadingsPatient.id,
+        allocatedDateStr
+      );
+    }
+
+    if (readGlucose.trim() && onAddLog) {
+      onAddLog('Blood Glucose', readGlucose.trim(), `Glucose logged by Super Admin on ${allocatedDateStr}. ${readNotes}`, logReadingsPatient.id);
+    }
+
+    onTriggerToast(`Successfully logged 3-reading procedure for ${logReadingsPatient.name} on ${allocatedDateStr} (Avg: ${avgSys}/${avgDia} mmHg)!`, 'success');
+    setLogReadingsPatient(null);
+  };
 
   // Super Admin provisioning panel input states
   const [newUserName, setNewUserName] = useState('');
@@ -153,8 +394,12 @@ export default function AdminLayout({
 
   const handleAdminAddUser = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUserName.trim() || !newUserEmail.trim() || !newUserPassword.trim()) {
-      onTriggerToast('Please complete all credential fields.', 'error');
+    const fName = regFirstName.trim() || newUserName.trim().split(' ')[0] || 'User';
+    const lName = regLastName.trim() || newUserName.trim().split(' ').slice(1).join(' ') || '';
+    const fullName = newUserName.trim() || `${fName} ${lName}`.trim();
+
+    if (!fullName || !newUserEmail.trim() || !newUserPassword.trim()) {
+      onTriggerToast('Please complete all required credential fields.', 'error');
       return;
     }
     const duplicated = users.some(u => u.email.toLowerCase() === newUserEmail.trim().toLowerCase());
@@ -163,14 +408,31 @@ export default function AdminLayout({
       return;
     }
 
+    // Auto calculate age from DOB
+    let calculatedAge = parseInt(regAge) || 38;
+    if (regDob) {
+      const birth = new Date(regDob);
+      if (!isNaN(birth.getTime())) {
+        const today = new Date();
+        let computed = today.getFullYear() - birth.getFullYear();
+        const m = today.getMonth() - birth.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+          computed--;
+        }
+        if (computed >= 0 && computed <= 130) {
+          calculatedAge = computed;
+        }
+      }
+    }
+
     let roleToAssign: 'patient' | 'provider' | 'admin' = 'patient';
     let addedDetails: Partial<AppUser> = {};
 
     if (activeRegistrySubTab === 'patients') {
       roleToAssign = 'patient';
       addedDetails = {
-        age: parseInt(regAge) || 38,
-        gender: regGender,
+        age: calculatedAge,
+        gender: regSex || regGender,
         maritalStatus: regMarital,
         employmentStatus: regEmployment,
         preferredLanguage: regLanguage,
@@ -185,8 +447,8 @@ export default function AdminLayout({
       addedDetails = {
         insuranceProvider: regSpecialty, // Use insuranceProvider as specialty helper
         insuranceMemberId: regHospital,  // Use insuranceMemberId as hospital helper
-        gender: regGender,
-        age: parseInt(regAge) || 45,
+        gender: regSex || regGender,
+        age: calculatedAge || 45,
         addressCity: regCity || 'Accra',
         addressState: regState || 'Greater Accra',
         verified: true
@@ -195,8 +457,8 @@ export default function AdminLayout({
       roleToAssign = 'admin';
       addedDetails = {
         isSuperAdmin: false,
-        age: parseInt(regAge) || 40,
-        gender: regGender,
+        age: calculatedAge || 40,
+        gender: regSex || regGender,
         maritalStatus: regMarital,
         addressStreet: regStreet || '88 Independence Ave',
         addressCity: regCity || 'Cantonments',
@@ -204,9 +466,19 @@ export default function AdminLayout({
       };
     }
 
+    // Allocate 4-digit User ID strictly in range 0001 - 9999
+    const assignedUserId = regCustomUserId.trim() ? formatUserId(regCustomUserId.trim()) : generateUserId(users);
+
     const brandNewUser: AppUser = {
-      id: `usr-${Date.now()}-${Math.floor(Math.random() * 1000000)}`,
-      name: newUserName.trim(),
+      id: assignedUserId,
+      userId: assignedUserId,
+      name: fullName,
+      firstName: fName,
+      lastName: lName,
+      sex: regSex || 'Female',
+      gender: regSex || regGender || 'Female',
+      dob: regDob || '1986-05-14',
+      age: calculatedAge,
       email: newUserEmail.trim().toLowerCase(),
       role: roleToAssign,
       status: 'Active',
@@ -218,10 +490,13 @@ export default function AdminLayout({
 
     if (onAddUser) {
       onAddUser(brandNewUser);
-      onTriggerToast(`Successfully provisioned new ${roleToAssign} account: ${newUserName}`, 'success');
+      onTriggerToast(`Successfully provisioned new ${roleToAssign} account: ${fullName} [ID #${assignedUserId}]`, 'success');
       setNewUserName('');
+      setRegFirstName('');
+      setRegLastName('');
       setNewUserEmail('');
       setNewUserPassword('');
+      setRegCustomUserId('');
     }
   };
 
@@ -287,13 +562,265 @@ export default function AdminLayout({
   const patients = users.filter(u => u.role === 'patient');
   const [selectedDownloadPatientId, setSelectedDownloadPatientId] = useState<string>(patients[0]?.id || '');
 
-  // Sliced user engagement and activity metrics
-  const slicedData = engagementData.slice(-parseInt(timeRange));
-  const totalActions = slicedData.reduce((acc, curr) => acc + curr.platformActions, 0);
-  const peakUsers = Math.max(...slicedData.map(d => d.activeUsers), 0);
+  // Sliced user engagement and activity metrics computed dynamically from database
+  const effectiveEngagementData = useMemo(() => {
+    if (engagementData && engagementData.length > 0) {
+      return engagementData.slice(-parseInt(timeRange));
+    }
+    if (auditLogs && auditLogs.length > 0) {
+      const grouped: Record<string, { actions: number; users: Set<string> }> = {};
+      auditLogs.forEach(log => {
+        const d = log.timestamp ? new Date(log.timestamp).toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' }) : 'Today';
+        if (!grouped[d]) grouped[d] = { actions: 0, users: new Set() };
+        grouped[d].actions += 1;
+        if (log.userId) grouped[d].users.add(log.userId);
+      });
+      return Object.entries(grouped).map(([date, val]) => ({
+        date,
+        activeUsers: Math.max(1, val.users.size),
+        platformActions: val.actions
+      })).slice(-parseInt(timeRange));
+    }
+    return [];
+  }, [engagementData, auditLogs, timeRange]);
+
+  const slicedData = effectiveEngagementData;
+  const totalActions = slicedData.length > 0 
+    ? slicedData.reduce((acc, curr) => acc + curr.platformActions, 0)
+    : (auditLogs ? auditLogs.length : 0);
+  const peakUsers = slicedData.length > 0 
+    ? Math.max(...slicedData.map(d => d.activeUsers), 0)
+    : (loggedInUserIds.length > 0 ? loggedInUserIds.length : (users.length > 0 ? 1 : 0));
   const avgUsers = slicedData.length > 0 
     ? Math.round(slicedData.reduce((acc, curr) => acc + curr.activeUsers, 0) / slicedData.length) 
-    : 0;
+    : (loggedInUserIds.length > 0 ? loggedInUserIds.length : 0);
+
+  // Real Critical Alerts derived from genuine clinical telemetry & logs in the database
+  const realCriticalAlerts = useMemo(() => {
+    const alerts: { title: string; category: string; age: string }[] = [];
+    (ahomkaEntries || []).forEach(e => {
+      if ((e.systolic && e.systolic >= systolicThreshold) || (e.diastolic && e.diastolic >= diastolicThreshold)) {
+        const patient = users.find(u => u.id === e.patientId);
+        const pName = patient ? patient.name : `Patient #${(e.patientId || '').slice(-4) || 'Ref'}`;
+        alerts.push({
+          title: `High Risk Blood Pressure (${e.systolic}/${e.diastolic} mmHg, Pulse ${e.pulse || 72})`,
+          category: `Clinical Quality · ${pName}`,
+          age: e.timestamp ? new Date(e.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recent'
+        });
+      }
+    });
+    (logs || []).forEach(l => {
+      if (l.isHighRisk) {
+        const patient = users.find(u => u.id === l.patientId);
+        const pName = patient ? patient.name : (l.patientName || `Patient #${(l.patientId || '').slice(-4) || 'Ref'}`);
+        alerts.push({
+          title: `High-Risk Health Vital (${l.metric}: ${l.value})`,
+          category: `Clinical Quality · ${pName}`,
+          age: l.timestamp ? new Date(l.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Recent'
+        });
+      }
+    });
+    return alerts;
+  }, [ahomkaEntries, logs, users, systolicThreshold, diastolicThreshold]);
+
+  // Unified Blood Pressure Data extracted from genuine health logs and Ahomka entries
+  const bloodPressureData = useMemo(() => {
+    const list: {
+      id: string;
+      rawTime: number;
+      displayDate: string;
+      fullTimestamp: string;
+      dateOfReading?: string;
+      systolic: number;
+      diastolic: number;
+      pulse?: number;
+      map: number;
+      stage: string;
+      isHighRisk: boolean;
+      patientId: string;
+      userId: string;
+      patientName: string;
+      firstName?: string;
+      lastName?: string;
+      sex?: string;
+      dob?: string;
+      source: string;
+      notes?: string;
+    }[] = [];
+
+    const parseStage = (sys: number, dia: number) => {
+      if (sys >= 180 || dia >= 120) return 'Hypertensive Crisis';
+      if (sys >= 140 || dia >= 90) return 'Stage 2 Hypertension';
+      if (sys >= 130 || dia >= 80) return 'Stage 1 Hypertension';
+      if (sys >= 120 && dia < 80) return 'Elevated';
+      return 'Normal BP';
+    };
+
+    // 1. Parse HealthLogs with metric 'Blood Pressure' or slash format value
+    (logs || []).forEach(l => {
+      if (l.metric === 'Blood Pressure' || (l.value && l.value.includes('/'))) {
+        const match = (l.value || '').match(/(\d{2,3})\s*\/\s*(\d{2,3})/);
+        if (match) {
+          const sys = parseInt(match[1], 10);
+          const dia = parseInt(match[2], 10);
+          if (!isNaN(sys) && !isNaN(dia) && sys > 40 && dia > 30) {
+            const patient = users.find(u => u.id === l.patientId || (l.userId && (u.userId === l.userId || u.id === l.userId)));
+            const demo = patient ? getUserDemographics(patient) : { firstName: l.firstName || '', lastName: l.lastName || '', sex: l.sex || 'Unspecified', dob: l.dob || 'Unspecified', age: undefined, fullName: l.patientName || 'Patient' };
+            const pName = demo.fullName || patient?.name || l.patientName || (l.patientId ? `Patient #${l.patientId.slice(-4)}` : 'Patient');
+            const formattedUserId = patient ? formatUserId(patient.id) : (l.userId ? formatUserId(l.userId) : (l.patientId ? formatUserId(l.patientId) : '0001'));
+            
+            const parsedDate = l.timestamp ? new Date(l.timestamp) : new Date();
+            const isValidDate = !isNaN(parsedDate.getTime());
+            const displayDate = isValidDate 
+              ? parsedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+              : (l.timestamp || 'Recorded');
+            
+            const rawTime = isValidDate ? parsedDate.getTime() : 0;
+            const mapVal = Math.round((2 * dia + sys) / 3);
+            const stage = parseStage(sys, dia);
+            const isHigh = !!l.isHighRisk || sys >= systolicThreshold || dia >= diastolicThreshold;
+
+            list.push({
+              id: l.id || `log-${Math.random()}`,
+              rawTime,
+              displayDate,
+              fullTimestamp: l.timestamp || displayDate,
+              dateOfReading: l.dateOfReading || l.timestamp || displayDate,
+              systolic: sys,
+              diastolic: dia,
+              map: mapVal,
+              stage,
+              isHighRisk: isHigh,
+              patientId: l.patientId || '',
+              userId: formattedUserId,
+              patientName: pName,
+              firstName: demo.firstName,
+              lastName: demo.lastName,
+              sex: demo.sex,
+              dob: demo.dob,
+              source: 'Clinical Vital Log',
+              notes: l.notes
+            });
+          }
+        }
+      }
+    });
+
+    // 2. Parse Ahomka multi-step entries
+    (ahomkaEntries || []).forEach(e => {
+      if (e.systolic && e.diastolic) {
+        const sys = typeof e.systolic === 'number' ? e.systolic : parseInt(String(e.systolic), 10);
+        const dia = typeof e.diastolic === 'number' ? e.diastolic : parseInt(String(e.diastolic), 10);
+        if (!isNaN(sys) && !isNaN(dia) && sys > 40 && dia > 30) {
+          if (!list.some(item => item.id === e.id)) {
+            const patient = users.find(u => u.id === e.patientId || (e.userId && (u.userId === e.userId || u.id === e.userId)));
+            const demo = patient ? getUserDemographics(patient) : { firstName: e.firstName || '', lastName: e.lastName || '', sex: e.sex || 'Unspecified', dob: e.dob || 'Unspecified', age: undefined, fullName: 'Patient' };
+            const pName = demo.fullName || patient?.name || (e.patientId ? `Patient #${e.patientId.slice(-4)}` : 'Patient');
+            const formattedUserId = patient ? formatUserId(patient.id) : (e.userId ? formatUserId(e.userId) : (e.patientId ? formatUserId(e.patientId) : '0001'));
+            
+            const parsedDate = e.timestamp ? new Date(e.timestamp) : new Date();
+            const isValidDate = !isNaN(parsedDate.getTime());
+            const displayDate = isValidDate 
+              ? parsedDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+              : (e.timestamp || 'Recorded');
+            
+            const rawTime = isValidDate ? parsedDate.getTime() : 0;
+            const mapVal = Math.round((2 * dia + sys) / 3);
+            const stage = parseStage(sys, dia);
+            const isHigh = sys >= systolicThreshold || dia >= diastolicThreshold;
+
+            list.push({
+              id: e.id || `ahomka-${Math.random()}`,
+              rawTime,
+              displayDate,
+              fullTimestamp: e.timestamp || displayDate,
+              dateOfReading: e.dateOfReading || e.timestamp || displayDate,
+              systolic: sys,
+              diastolic: dia,
+              pulse: e.pulse,
+              map: mapVal,
+              stage,
+              isHighRisk: isHigh,
+              patientId: e.patientId || '',
+              userId: formattedUserId,
+              patientName: pName,
+              firstName: demo.firstName,
+              lastName: demo.lastName,
+              sex: demo.sex,
+              dob: demo.dob,
+              source: 'Ahomka Protocol',
+              notes: e.notes
+            });
+          }
+        }
+      }
+    });
+
+    // Sort chronologically ascending for line chart progression
+    list.sort((a, b) => a.rawTime - b.rawTime);
+
+    return list;
+  }, [logs, ahomkaEntries, users, systolicThreshold, diastolicThreshold]);
+
+  // Filtered dataset according to selected patient and time range
+  const filteredBloodPressureData = useMemo(() => {
+    let dataset = bloodPressureData;
+
+    if (bpPatientFilter !== 'all') {
+      dataset = dataset.filter(d => d.patientId === bpPatientFilter);
+    }
+
+    if (bpTimeRange === '7-day') {
+      const cutoffTime = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const recent = dataset.filter(d => d.rawTime >= cutoffTime);
+      dataset = recent.length > 0 ? recent : dataset.slice(-Math.min(7, dataset.length));
+    } else if (bpTimeRange === '30-day') {
+      const cutoffTime = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const recent = dataset.filter(d => d.rawTime >= cutoffTime);
+      dataset = recent.length > 0 ? recent : dataset.slice(-Math.min(30, dataset.length));
+    }
+
+    return dataset;
+  }, [bloodPressureData, bpPatientFilter, bpTimeRange]);
+
+  // Summary statistics for the Blood Pressure Trend visualization
+  const bpStats = useMemo(() => {
+    if (filteredBloodPressureData.length === 0) {
+      return {
+        count: 0,
+        avgSystolic: 0,
+        avgDiastolic: 0,
+        avgMAP: 0,
+        highRiskCount: 0,
+        normalCount: 0,
+        maxSystolic: 0,
+        minDiastolic: 0,
+        latest: null as any
+      };
+    }
+
+    const count = filteredBloodPressureData.length;
+    const sumSys = filteredBloodPressureData.reduce((acc, curr) => acc + curr.systolic, 0);
+    const sumDia = filteredBloodPressureData.reduce((acc, curr) => acc + curr.diastolic, 0);
+    const sumMAP = filteredBloodPressureData.reduce((acc, curr) => acc + curr.map, 0);
+    const highRiskCount = filteredBloodPressureData.filter(d => d.isHighRisk).length;
+    const normalCount = count - highRiskCount;
+    const maxSystolic = Math.max(...filteredBloodPressureData.map(d => d.systolic));
+    const minDiastolic = Math.min(...filteredBloodPressureData.map(d => d.diastolic));
+    const latest = filteredBloodPressureData[filteredBloodPressureData.length - 1];
+
+    return {
+      count,
+      avgSystolic: Math.round(sumSys / count),
+      avgDiastolic: Math.round(sumDia / count),
+      avgMAP: Math.round(sumMAP / count),
+      highRiskCount,
+      normalCount,
+      maxSystolic,
+      minDiastolic,
+      latest
+    };
+  }, [filteredBloodPressureData]);
 
   const handleDownloadHealthSummary = () => {
     const selectedPat = users.find(u => u.id === selectedDownloadPatientId);
@@ -639,6 +1166,104 @@ export default function AdminLayout({
     onTriggerToast(`Full Patient Registry CSV populated with clinical outcome averages exported!`, 'success');
   };
 
+  // Full System State Excel Export Function (.xlsx)
+  const handleExportSystemDataExcel = () => {
+    try {
+      const wb = XLSX.utils.book_new();
+
+      // Sheet 1: User Registry
+      const usersData = users.map(u => ({
+        "User ID": u.id,
+        "Full Name": u.name,
+        "Email Address": u.email,
+        "Role": u.role,
+        "Status": u.status,
+        "Verified": u.verified ? "Yes" : "No",
+        "Phone Number": u.phone || "N/A",
+        "Gender": u.gender || "N/A",
+        "City": u.city || "N/A",
+        "State/Region": u.state || "N/A",
+        "Primary Condition": u.primaryDiagnosis || "N/A",
+        "Language": u.preferredLanguage || "English",
+        "Emergency Contact": u.emergencyContact || "N/A",
+      }));
+      const wsUsers = XLSX.utils.json_to_sheet(usersData);
+      XLSX.utils.book_append_sheet(wb, wsUsers, "User Registry");
+
+      // Sheet 2: Biometric Telemetry Logs
+      const logsData = logs.map(l => ({
+        "Log ID": l.id,
+        "Patient Name": l.patientName || "N/A",
+        "Patient ID": l.patientId,
+        "Metric": l.metric,
+        "Value": l.value,
+        "Trend": l.trend,
+        "Verified By": l.verifiedBy,
+        "High Risk Standing": l.isHighRisk ? "ALERT HIGH RISK" : "Normal",
+        "Timestamp": l.timestamp,
+        "Notes": l.notes
+      }));
+      const wsLogs = XLSX.utils.json_to_sheet(logsData);
+      XLSX.utils.book_append_sheet(wb, wsLogs, "Biometric Logs");
+
+      // Sheet 3: Ahomka Ho Check-Ins
+      const ahomkaData = ahomkaEntries.map(e => ({
+        "Entry ID": e.id,
+        "Patient ID": e.patientId,
+        "Timestamp": e.timestamp,
+        "Systolic BP (mmHg)": e.systolic ?? "N/A",
+        "Diastolic BP (mmHg)": e.diastolic ?? "N/A",
+        "Pulse (bpm)": e.pulse ?? "N/A",
+        "Mood Rating (1-10)": e.mood,
+        "Stress Level (1-10)": e.stress,
+        "Pain Severity (1-10)": e.painLevel,
+        "Calculated Relief Score (%)": `${e.comfortScore}%`,
+        "Feeling Description": e.feeling || "N/A",
+        "Medication Adherence": e.medicationAdherence || "N/A",
+        "Reported Symptoms": (e.symptoms || []).join(", "),
+        "Clinical Notes": e.notes
+      }));
+      const wsAhomka = XLSX.utils.json_to_sheet(ahomkaData);
+      XLSX.utils.book_append_sheet(wb, wsAhomka, "Ahomka Relief Index");
+
+      // Sheet 4: Audit Trails & Operational Security
+      const auditData = auditLogs.map(a => ({
+        "Audit ID": a.id,
+        "User ID": a.userId,
+        "User Name": a.userName,
+        "Role": a.role,
+        "Action": a.action,
+        "Timestamp": a.timestamp,
+        "Operation Details": a.details
+      }));
+      const wsAudit = XLSX.utils.json_to_sheet(auditData);
+      XLSX.utils.book_append_sheet(wb, wsAudit, "Audit Logs");
+
+      // Sheet 5: Appointments & Consultations
+      const bookingsData = bookings.map(b => ({
+        "Booking ID": b.id,
+        "Patient Name": b.patientName,
+        "Provider Name": b.providerName,
+        "Specialization": b.specialization,
+        "Scheduled Date": b.date,
+        "Time Slot": b.timeSlot,
+        "Status": b.status,
+        "Consultation Type": b.type,
+        "Notes": b.notes || "N/A"
+      }));
+      const wsBookings = XLSX.utils.json_to_sheet(bookingsData);
+      XLSX.utils.book_append_sheet(wb, wsBookings, "Appointments");
+
+      const exportFileName = `CuraFlow_SuperAdmin_SystemState_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(wb, exportFileName);
+
+      onTriggerToast(`System state exported successfully as multi-sheet Excel workbook (${exportFileName})!`, 'success');
+    } catch (err) {
+      console.error("Excel export error:", err);
+      onTriggerToast(`Failed to generate Excel workbook: ${String(err)}`, 'error');
+    }
+  };
+
   // CMS Article Builder Form state
   const [artTitle, setArtTitle] = useState('');
   const [artCategory, setArtCategory] = useState('Sleep');
@@ -714,7 +1339,7 @@ export default function AdminLayout({
       <div className="md:hidden flex items-center justify-between bg-white dark:bg-slate-900 px-4 py-3 border-b border-slate-200 dark:border-slate-800 shrink-0 select-none">
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest font-mono">Panel</span>
-          <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
+          <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
             {activeTab === 'analytics' && 'Admin Metrics'}
             {activeTab === 'users' && 'Users Registry'}
             {activeTab === 'cms' && 'Articles Publisher'}
@@ -760,7 +1385,7 @@ export default function AdminLayout({
               <div className="space-y-6">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
                   <div className="flex items-center gap-2">
-                    <div className="px-2 py-0.5 bg-indigo-600 rounded-lg flex items-center justify-center text-white text-xs font-black shadow-lg">
+                    <div className="px-2 py-0.5 bg-emerald-600 rounded-lg flex items-center justify-center text-white text-xs font-black shadow-lg">
                       CFL
                     </div>
                     <span className="font-sans font-bold text-slate-900 dark:text-white">Admin Portals</span>
@@ -776,7 +1401,7 @@ export default function AdminLayout({
                 <div className="space-y-1">
                   <button 
                     onClick={() => { setActiveTab('analytics'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'analytics' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'analytics' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <Activity className="w-4 h-4" />
                     <span>Admin Metrics console</span>
@@ -784,7 +1409,7 @@ export default function AdminLayout({
                   
                   <button 
                     onClick={() => { setActiveTab('users'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'users' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'users' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <Users className="w-4 h-4" />
                     <span>Users Registry</span>
@@ -792,7 +1417,7 @@ export default function AdminLayout({
 
                   <button 
                     onClick={() => { setActiveTab('cms'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'cms' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'cms' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <FileText className="w-4 h-4" />
                     <span>Articles Publisher</span>
@@ -800,7 +1425,7 @@ export default function AdminLayout({
 
                   <button 
                     onClick={() => { setActiveTab('broadcaster'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'broadcaster' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'broadcaster' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <Bell className="w-4 h-4" />
                     <span>Broadcaster Desk</span>
@@ -808,7 +1433,7 @@ export default function AdminLayout({
 
                   <button 
                     onClick={() => { setActiveTab('faq'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'faq' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'faq' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <HelpCircle className="w-4 h-4" />
                     <span>FAQ Composer</span>
@@ -816,7 +1441,7 @@ export default function AdminLayout({
 
                   <button 
                     onClick={() => { setActiveTab('auditing'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'auditing' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'auditing' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <Globe className="w-4 h-4" />
                     <span>Audit Diagnostics</span>
@@ -824,7 +1449,7 @@ export default function AdminLayout({
 
                   <button 
                     onClick={() => { setActiveTab('forums'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'forums' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'forums' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <Users className="w-4 h-4" />
                     <span>Support Forums</span>
@@ -832,7 +1457,7 @@ export default function AdminLayout({
 
                   <button 
                     onClick={() => { setActiveTab('department_head'); setIsMobileMenuOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'department_head' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                    className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'department_head' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                   >
                     <Briefcase className="w-4 h-4" />
                     <span>Department Head Desk</span>
@@ -854,7 +1479,7 @@ export default function AdminLayout({
           <button 
             id="tab-adm-analytics"
             onClick={() => setActiveTab('analytics')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'analytics' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'analytics' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Activity className="w-4 h-4" />
             <span>Admin Metrics console</span>
@@ -863,7 +1488,7 @@ export default function AdminLayout({
           <button 
             id="tab-adm-users"
             onClick={() => setActiveTab('users')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'users' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'users' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Users className="w-4 h-4" />
             <span>Users Registry</span>
@@ -872,7 +1497,7 @@ export default function AdminLayout({
           <button 
             id="tab-adm-cms"
             onClick={() => setActiveTab('cms')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'cms' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'cms' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <FileText className="w-4 h-4" />
             <span>Articles Publisher</span>
@@ -881,7 +1506,7 @@ export default function AdminLayout({
           <button 
             id="tab-adm-broadcaster"
             onClick={() => setActiveTab('broadcaster')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'broadcaster' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'broadcaster' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Bell className="w-4 h-4" />
             <span>Broadcaster Desk</span>
@@ -890,7 +1515,7 @@ export default function AdminLayout({
           <button 
             id="tab-adm-faq"
             onClick={() => setActiveTab('faq')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'faq' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'faq' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <HelpCircle className="w-4 h-4" />
             <span>FAQ Composer</span>
@@ -899,7 +1524,7 @@ export default function AdminLayout({
           <button 
             id="tab-adm-auditing"
             onClick={() => setActiveTab('auditing')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'auditing' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'auditing' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Globe className="w-4 h-4" />
             <span>Audit Diagnostics</span>
@@ -908,7 +1533,7 @@ export default function AdminLayout({
           <button 
             id="tab-adm-forums"
             onClick={() => setActiveTab('forums')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'forums' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'forums' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Users className="w-4 h-4" />
             <span>Support Forums</span>
@@ -917,7 +1542,7 @@ export default function AdminLayout({
           <button 
             id="tab-adm-department-head"
             onClick={() => setActiveTab('department_head')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'department_head' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all text-left cursor-pointer ${activeTab === 'department_head' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/10' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
           >
             <Briefcase className="w-4 h-4" />
             <span>Department Head Desk</span>
@@ -941,14 +1566,25 @@ export default function AdminLayout({
         {activeTab === 'analytics' && (
           <div className="space-y-6">
             
-            <div className="bg-[#1E1B4B] text-indigo-100 rounded-2xl shadow-xl p-6 border border-indigo-900/40 relative overflow-hidden">
+            <div className="bg-slate-950 text-emerald-100 rounded-2xl shadow-xl p-6 border border-emerald-900/40 relative overflow-hidden">
               <div className="absolute right-0 top-0 bottom-0 opacity-10 w-48">
-                <Layout className="w-full h-full text-indigo-50" />
+                <Layout className="w-full h-full text-emerald-50" />
               </div>
-              <div className="relative">
-                <span className="bg-indigo-500 text-white text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider">Super Administrator Terminal</span>
-                <h2 className="font-display text-xl font-bold mt-2.5">Platform Operations Telemetry Controls</h2>
-                <p className="text-xs text-indigo-300 mt-1">Audit active registration lists, license credential verifications, and deploy system-wide broadcasts.</p>
+              <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <span className="bg-emerald-500 text-slate-950 text-[10px] font-extrabold px-2.5 py-1 rounded-full uppercase tracking-wider">Super Administrator Terminal</span>
+                  <h2 className="font-display text-xl font-bold mt-2.5">Platform Operations Telemetry Controls</h2>
+                  <p className="text-xs text-emerald-300 mt-1">Audit active registration lists, license credential verifications, and deploy system-wide broadcasts.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExportSystemDataExcel}
+                  className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold rounded-xl text-xs transition cursor-pointer flex items-center gap-2 shadow-lg shadow-emerald-500/20 shrink-0 self-start sm:self-center"
+                  title="Export complete system state (users, logs, audit trails, appointments) to Excel document"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Export System Excel (.xlsx)</span>
+                </button>
               </div>
             </div>
 
@@ -966,7 +1602,7 @@ export default function AdminLayout({
                 <p className="text-2xl font-black mt-1 text-slate-950 dark:text-white">
                   {users.filter(u => u.role === 'provider').length}
                 </p>
-                <div className="text-[9px] text-indigo-500 font-bold bg-indigo-50 px-1.5 py-0.5 rounded mt-2 inline-block">Licenses audited</div>
+                <div className="text-[9px] text-emerald-500 font-bold bg-emerald-50 px-1.5 py-0.5 rounded mt-2 inline-block">Licenses audited</div>
               </div>
 
               <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
@@ -983,12 +1619,351 @@ export default function AdminLayout({
 
             </div>
 
+            {/* 🩺 Cardiovascular Blood Pressure Longitudinal Telemetry Line Chart */}
+            <motion.div
+              id="admin-blood-pressure-trends-chart"
+              initial={{ opacity: 0, y: 22, scale: 0.985 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+              className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-6"
+            >
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+                <div>
+                  <h4 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
+                    <HeartPulse className="w-4.5 h-4.5 text-rose-500 animate-pulse" />
+                    <span>Blood Pressure Longitudinal Trends (Systolic & Diastolic)</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Telemetry visualizer tracking arterial pressure oscillations, clinical thresholds, and high-risk hypertensive spikes over time.
+                  </p>
+                </div>
+
+                {/* Filter and threshold controls */}
+                <div className="flex flex-wrap items-center gap-2.5">
+                  {/* Patient Filter */}
+                  <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 px-2.5 py-1 rounded-xl">
+                    <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <select
+                      id="admin-bp-patient-select"
+                      value={bpPatientFilter}
+                      onChange={(e) => setBpPatientFilter(e.target.value)}
+                      className="bg-transparent text-[11px] font-bold text-slate-800 dark:text-white focus:outline-none cursor-pointer pr-1"
+                      title="Filter blood pressure trends by patient cohort"
+                    >
+                      <option value="all" className="text-slate-900">All Patients ({bloodPressureData.length} Vitals)</option>
+                      {patients.map(p => {
+                        const count = bloodPressureData.filter(d => d.patientId === p.id).length;
+                        return (
+                          <option key={p.id} value={p.id} className="text-slate-900">
+                            {p.name} ({count} logs)
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  {/* Time Range Filter: 7-day, 30-day, All-time */}
+                  <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 px-2.5 py-1 rounded-xl">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Window:</span>
+                    <select
+                      id="admin-bp-timerange-select"
+                      value={bpTimeRange}
+                      onChange={(e) => setBpTimeRange(e.target.value as '7-day' | '30-day' | 'All-time')}
+                      className="bg-transparent text-[11px] font-bold text-slate-800 dark:text-white focus:outline-none cursor-pointer"
+                      title="Switch between 7-day, 30-day, and All-time longitudinal views"
+                    >
+                      <option value="7-day" className="text-slate-900">7-day</option>
+                      <option value="30-day" className="text-slate-900">30-day</option>
+                      <option value="All-time" className="text-slate-900">All-time</option>
+                    </select>
+                  </div>
+
+                  {/* Reference Guidelines Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setShowBpRefLines(!showBpRefLines)}
+                    className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer border ${
+                      showBpRefLines 
+                        ? 'bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/50' 
+                        : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+                    }`}
+                    title="Toggle clinical High Risk reference areas and guidelines"
+                  >
+                    <Activity className="w-3.5 h-3.5" />
+                    <span>High Risk Zones {showBpRefLines ? 'ON' : 'OFF'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Statistical Metrics KPI Row */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 bg-slate-50/60 dark:bg-slate-950/25 p-4 rounded-xl border border-slate-100 dark:border-slate-800/60">
+                <div className="space-y-1">
+                  <span className="text-[9px] uppercase font-bold text-rose-500 tracking-wider flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-rose-500 inline-block"></span>
+                    Mean Systolic
+                  </span>
+                  <p className="text-base font-black text-slate-950 dark:text-white">
+                    {bpStats.avgSystolic > 0 ? `${bpStats.avgSystolic} mmHg` : '--'}
+                  </p>
+                  <span className="text-[9px] text-slate-400 block font-mono">Normal &lt;120 mmHg</span>
+                </div>
+
+                <div className="space-y-1 border-l border-slate-200/60 dark:border-slate-800 pl-3">
+                  <span className="text-[9px] uppercase font-bold text-blue-500 tracking-wider flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-blue-500 inline-block"></span>
+                    Mean Diastolic
+                  </span>
+                  <p className="text-base font-black text-slate-950 dark:text-white">
+                    {bpStats.avgDiastolic > 0 ? `${bpStats.avgDiastolic} mmHg` : '--'}
+                  </p>
+                  <span className="text-[9px] text-slate-400 block font-mono">Normal &lt;80 mmHg</span>
+                </div>
+
+                <div className="space-y-1 border-l border-slate-200/60 dark:border-slate-800 pl-3">
+                  <span className="text-[9px] uppercase font-bold text-emerald-500 tracking-wider">Mean Arterial (MAP)</span>
+                  <p className="text-base font-black text-slate-950 dark:text-white">
+                    {bpStats.avgMAP > 0 ? `${bpStats.avgMAP} mmHg` : '--'}
+                  </p>
+                  <span className="text-[9px] text-emerald-600 dark:text-emerald-400 block font-mono">Target: 70–100 mmHg</span>
+                </div>
+
+                <div className="space-y-1 border-l border-slate-200/60 dark:border-slate-800 pl-3">
+                  <span className="text-[9px] uppercase font-bold text-amber-500 tracking-wider">Elevated / High Risk</span>
+                  <p className="text-base font-black text-slate-950 dark:text-white">
+                    {bpStats.highRiskCount} <span className="text-xs font-semibold text-slate-400">readings</span>
+                  </p>
+                  <span className="text-[9px] text-amber-500 block font-mono">
+                    {bpStats.count > 0 ? `${Math.round((bpStats.highRiskCount / bpStats.count) * 100)}% of cohort` : '0%'}
+                  </span>
+                </div>
+
+                <div className="space-y-1 border-l border-slate-200/60 dark:border-slate-800 pl-3 col-span-2 sm:col-span-1">
+                  <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Total Readings</span>
+                  <p className="text-base font-black text-slate-950 dark:text-white">
+                    {bpStats.count} <span className="text-xs font-semibold text-slate-400">records</span>
+                  </p>
+                  <span className="text-[9px] text-slate-400 block font-mono truncate">
+                    {bpStats.latest ? `Latest: ${bpStats.latest.systolic}/${bpStats.latest.diastolic} mmHg` : 'Awaiting input'}
+                  </span>
+                </div>
+              </div>
+
+              {/* The Recharts Line Chart Container with Motion Reveal Animation */}
+              <motion.div 
+                key={`${bpTimeRange}-${bpPatientFilter}`}
+                initial={{ opacity: 0, scale: 0.995 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.45, ease: "easeOut" }}
+                className="w-full h-[290px] md:h-[350px]"
+              >
+                {filteredBloodPressureData.length === 0 ? (
+                  <div className="h-full w-full flex flex-col items-center justify-center text-center p-8 space-y-3 bg-slate-50/50 dark:bg-slate-950/20 rounded-xl border border-slate-100 dark:border-slate-800">
+                    <HeartPulse className="w-10 h-10 text-slate-300 dark:text-slate-600 animate-pulse" />
+                    <div className="space-y-1">
+                      <p className="text-xs font-bold text-slate-700 dark:text-slate-300">No Blood Pressure Telemetry Found</p>
+                      <p className="text-[11px] text-slate-400 max-w-md">
+                        {bpPatientFilter !== 'all' 
+                          ? 'Selected patient has no recorded blood pressure entries matching this filter window.' 
+                          : 'Blood pressure readings recorded via clinical logs or patient Ahomka check-ins will visualize automatically.'}
+                      </p>
+                    </div>
+                    {bpPatientFilter !== 'all' && (
+                      <button
+                        onClick={() => setBpPatientFilter('all')}
+                        className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 rounded-lg text-xs font-bold transition cursor-pointer"
+                      >
+                        Reset to All Patients Cohort
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={filteredBloodPressureData}
+                      margin={{ top: 15, right: 15, left: -10, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.12)" />
+                      <XAxis 
+                        dataKey="displayDate" 
+                        fontSize={9} 
+                        stroke="#94a3b8" 
+                        tickLine={false}
+                        axisLine={false} 
+                      />
+                      <YAxis 
+                        fontSize={9} 
+                        stroke="#94a3b8" 
+                        tickLine={false}
+                        axisLine={false} 
+                        domain={[
+                          (dataMin: number) => Math.max(40, Math.floor((dataMin - 15) / 10) * 10),
+                          (dataMax: number) => Math.min(220, Math.ceil((dataMax + 15) / 10) * 10)
+                        ]}
+                        unit=" mmHg"
+                      />
+                      <Tooltip content={<BloodPressureCustomTooltip />} />
+                      <Legend 
+                        verticalAlign="top" 
+                        height={36} 
+                        iconSize={8}
+                        iconType="circle"
+                        wrapperStyle={{ fontSize: '10.5px', fontWeight: 'bold' }} 
+                      />
+
+                      {/* Clinical Reference Areas & Threshold Lines */}
+                      {showBpRefLines && (
+                        <>
+                          {/* 🔴 High Risk Systolic Reference Area (≥140 mmHg) */}
+                          <ReferenceArea 
+                            y1={140} 
+                            y2={220} 
+                            {...({
+                              fill: '#ef4444',
+                              fillOpacity: 0.065,
+                              stroke: '#ef4444',
+                              strokeOpacity: 0.25,
+                              strokeDasharray: '3 3'
+                            } as any)}
+                          />
+
+                          {/* 🟠 High Risk Diastolic Reference Area (≥90 mmHg) */}
+                          <ReferenceArea 
+                            y1={90} 
+                            y2={135} 
+                            {...({
+                              fill: '#f97316',
+                              fillOpacity: 0.05,
+                              stroke: '#f97316',
+                              strokeOpacity: 0.22,
+                              strokeDasharray: '3 3'
+                            } as any)}
+                          />
+
+                          {/* 🟢 Optimal Diastolic Target Area (60–80 mmHg) */}
+                          <ReferenceArea 
+                            y1={60} 
+                            y2={80} 
+                            {...({
+                              fill: '#10b981',
+                              fillOpacity: 0.035,
+                              stroke: '#10b981',
+                              strokeOpacity: 0.15,
+                              strokeDasharray: '2 2'
+                            } as any)}
+                          />
+
+                          {/* Reference Lines with High-Visibility Clinical Labels */}
+                          <ReferenceLine 
+                            y={140} 
+                            stroke="#ef4444" 
+                            strokeDasharray="4 4" 
+                            strokeWidth={1.5}
+                            label={{ 
+                              value: '⚠ Systolic High Risk (≥140 mmHg)', 
+                              position: 'insideTopRight', 
+                              fill: '#ef4444', 
+                              fontSize: 9.5, 
+                              fontWeight: 'bold' 
+                            }} 
+                          />
+                          <ReferenceLine 
+                            y={130} 
+                            stroke="#f59e0b" 
+                            strokeDasharray="3 3" 
+                            strokeWidth={1}
+                            label={{ 
+                              value: 'Stage 1 Systolic (≥130 mmHg)', 
+                              position: 'insideTopRight', 
+                              fill: '#f59e0b', 
+                              fontSize: 9 
+                            }} 
+                          />
+                          <ReferenceLine 
+                            y={90} 
+                            stroke="#f97316" 
+                            strokeDasharray="4 4" 
+                            strokeWidth={1.5}
+                            label={{ 
+                              value: '⚠ Diastolic High Risk (≥90 mmHg)', 
+                              position: 'insideBottomRight', 
+                              fill: '#f97316', 
+                              fontSize: 9.5, 
+                              fontWeight: 'bold' 
+                            }} 
+                          />
+                          <ReferenceLine 
+                            y={80} 
+                            stroke="#3b82f6" 
+                            strokeDasharray="3 3" 
+                            strokeWidth={1}
+                            label={{ 
+                              value: 'Normal Diastolic Baseline (80 mmHg)', 
+                              position: 'insideBottomRight', 
+                              fill: '#3b82f6', 
+                              fontSize: 9 
+                            }} 
+                          />
+                        </>
+                      )}
+
+                      <Line
+                        type="monotone"
+                        name="Systolic Blood Pressure (mmHg)"
+                        dataKey="systolic"
+                        stroke="#ef4444"
+                        strokeWidth={2.75}
+                        dot={{ r: 4.5, strokeWidth: 1.5, fill: '#ef4444' }}
+                        activeDot={{ r: 6.5, strokeWidth: 2, fill: '#dc2626', stroke: '#ffffff' }}
+                        isAnimationActive={true}
+                        animationDuration={1000}
+                        animationEasing="ease-out"
+                      />
+                      <Line
+                        type="monotone"
+                        name="Diastolic Blood Pressure (mmHg)"
+                        dataKey="diastolic"
+                        stroke="#3b82f6"
+                        strokeWidth={2.75}
+                        dot={{ r: 4.5, strokeWidth: 1.5, fill: '#3b82f6' }}
+                        activeDot={{ r: 6.5, strokeWidth: 2, fill: '#2563eb', stroke: '#ffffff' }}
+                        isAnimationActive={true}
+                        animationDuration={1000}
+                        animationEasing="ease-out"
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </motion.div>
+
+              {/* AHA/ACC Clinical Stages Reference Legend & Risk Zones Note */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-500 dark:text-slate-400">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold uppercase tracking-wider text-slate-400">AHA/ACC Classification:</span>
+                  <span className="hidden sm:inline text-slate-400">Shaded background zones denote high-risk thresholds</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400 px-2 py-0.5 rounded font-semibold border border-emerald-200 dark:border-emerald-900/40">
+                    Normal: &lt;120 / &lt;80
+                  </span>
+                  <span className="bg-yellow-50 text-yellow-700 dark:bg-yellow-950/30 dark:text-yellow-400 px-2 py-0.5 rounded font-semibold border border-yellow-200 dark:border-yellow-900/40">
+                    Elevated: 120–129 / &lt;80
+                  </span>
+                  <span className="bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400 px-2 py-0.5 rounded font-semibold border border-amber-200 dark:border-amber-900/40">
+                    Stage 1 HTN: 130–139 / 80–89
+                  </span>
+                  <span className="bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-400 px-2 py-0.5 rounded font-semibold border border-rose-200 dark:border-rose-900/40">
+                    Stage 2 HTN: ≥140 / ≥90
+                  </span>
+                </div>
+              </div>
+            </motion.div>
+
             {/* User Engagement & Platform Activity Line Chart Section */}
             <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
                   <h4 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                     <span>User Engagement & Daily Platform Activity Trends</span>
                   </h4>
                   <p className="text-[11px] text-slate-400 mt-1">
@@ -1015,7 +1990,7 @@ export default function AdminLayout({
                 <div className="space-y-1">
                   <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Accumulated Actions</span>
                   <p className="text-sm font-black text-slate-950 dark:text-white">{totalActions.toLocaleString()}</p>
-                  <span className="text-[9px] text-indigo-500 dark:text-indigo-400 font-semibold block">HIPAA audits logged</span>
+                  <span className="text-[9px] text-emerald-500 dark:text-emerald-400 font-semibold block">HIPAA audits logged</span>
                 </div>
                 <div className="space-y-1 border-l border-slate-200/60 dark:border-slate-800 pl-3">
                   <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Peak Daily Users</span>
@@ -1031,64 +2006,72 @@ export default function AdminLayout({
 
               {/* The Recharts Line Chart */}
               <div className="w-full h-[260px] md:h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={slicedData}
-                    margin={{ top: 15, right: 10, left: -20, bottom: 5 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.12)" />
-                    <XAxis 
-                      dataKey="date" 
-                      fontSize={9} 
-                      stroke="#94a3b8" 
-                      tickLine={false}
-                      axisLine={false} 
-                    />
-                    <YAxis 
-                      fontSize={9} 
-                      stroke="#94a3b8" 
-                      tickLine={false}
-                      axisLine={false} 
-                      yAxisId="left"
-                    />
-                    <YAxis 
-                      fontSize={9} 
-                      stroke="#94a3b8" 
-                      tickLine={false}
-                      axisLine={false} 
-                      yAxisId="right"
-                      orientation="right"
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Legend 
-                      verticalAlign="top" 
-                      height={36} 
-                      iconSize={8}
-                      iconType="circle"
-                      wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} 
-                    />
-                    <Line
-                      yAxisId="left"
-                      type="monotone"
-                      name="Active Users"
-                      dataKey="activeUsers"
-                      stroke="#4f46e5"
-                      strokeWidth={2.5}
-                      dot={{ r: 2, strokeWidth: 1.5 }}
-                      activeDot={{ r: 5, strokeWidth: 0 }}
-                    />
-                    <Line
-                      yAxisId="right"
-                      type="monotone"
-                      name="Platform Actions"
-                      dataKey="platformActions"
-                      stroke="#0ea5e9"
-                      strokeWidth={2.5}
-                      dot={{ r: 2, strokeWidth: 1.5 }}
-                      activeDot={{ r: 5, strokeWidth: 0 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                {slicedData.length === 0 ? (
+                  <div className="h-full w-full flex flex-col items-center justify-center text-center p-6 space-y-2 bg-slate-50/50 dark:bg-slate-950/20 rounded-xl border border-slate-100 dark:border-slate-800">
+                    <TrendingUp className="w-8 h-8 text-slate-300 dark:text-slate-600" />
+                    <p className="text-xs font-bold text-slate-600 dark:text-slate-400">No Platform Activity Telemetry</p>
+                    <p className="text-[10px] text-slate-400">User engagement metrics and audit activities will chart automatically as actions occur.</p>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={slicedData}
+                      margin={{ top: 15, right: 10, left: -20, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.12)" />
+                      <XAxis 
+                        dataKey="date" 
+                        fontSize={9} 
+                        stroke="#94a3b8" 
+                        tickLine={false}
+                        axisLine={false} 
+                      />
+                      <YAxis 
+                        fontSize={9} 
+                        stroke="#94a3b8" 
+                        tickLine={false}
+                        axisLine={false} 
+                        yAxisId="left"
+                      />
+                      <YAxis 
+                        fontSize={9} 
+                        stroke="#94a3b8" 
+                        tickLine={false}
+                        axisLine={false} 
+                        yAxisId="right"
+                        orientation="right"
+                      />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend 
+                        verticalAlign="top" 
+                        height={36} 
+                        iconSize={8}
+                        iconType="circle"
+                        wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} 
+                      />
+                      <Line
+                        yAxisId="left"
+                        type="monotone"
+                        name="Active Users"
+                        dataKey="activeUsers"
+                        stroke="#4f46e5"
+                        strokeWidth={2.5}
+                        dot={{ r: 2, strokeWidth: 1.5 }}
+                        activeDot={{ r: 5, strokeWidth: 0 }}
+                      />
+                      <Line
+                        yAxisId="right"
+                        type="monotone"
+                        name="Platform Actions"
+                        dataKey="platformActions"
+                        stroke="#0ea5e9"
+                        strokeWidth={2.5}
+                        dot={{ r: 2, strokeWidth: 1.5 }}
+                        activeDot={{ r: 5, strokeWidth: 0 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
               </div>
             </div>
 
@@ -1124,81 +2107,89 @@ export default function AdminLayout({
                 <div className="space-y-1 border-l border-slate-200/60 dark:border-slate-800 pl-4">
                   <span className="text-[9px] uppercase font-bold text-slate-400 tracking-wider">Avg Response Time</span>
                   <p className="text-sm font-black text-slate-950 dark:text-white">{avgResponseTime} hours</p>
-                  <span className="text-[9px] text-indigo-500 dark:text-indigo-400 font-semibold block">Real-time alerts triggered</span>
+                  <span className="text-[9px] text-emerald-500 dark:text-emerald-400 font-semibold block">Real-time alerts triggered</span>
                 </div>
               </div>
 
               {/* Weekly Trend Recharts Line Chart */}
               <div className="w-full h-[260px] md:h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={weeklyComplaints}
-                    margin={{ top: 15, right: 10, left: -20, bottom: 5 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.12)" />
-                    <XAxis 
-                      dataKey="week" 
-                      fontSize={9} 
-                      stroke="#94a3b8" 
-                      tickLine={false}
-                      axisLine={false} 
-                    />
-                    <YAxis 
-                      fontSize={9} 
-                      stroke="#94a3b8" 
-                      tickLine={false}
-                      axisLine={false} 
-                      yAxisId="left"
-                    />
-                    <YAxis 
-                      fontSize={9} 
-                      stroke="#94a3b8" 
-                      tickLine={false}
-                      axisLine={false} 
-                      yAxisId="right"
-                      orientation="right"
-                    />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Legend 
-                      verticalAlign="top" 
-                      height={36} 
-                      iconSize={8}
-                      iconType="circle"
-                      wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} 
-                    />
-                    <Line
-                      yAxisId="left"
-                      type="monotone"
-                      name="Escalated Complaints"
-                      dataKey="escalated"
-                      stroke="#ef4444"
-                      strokeWidth={2.5}
-                      dot={{ r: 4, strokeWidth: 1.5 }}
-                      activeDot={{ r: 6, strokeWidth: 0 }}
-                    />
-                    <Line
-                      yAxisId="left"
-                      type="monotone"
-                      name="Resolved Complaints"
-                      dataKey="resolved"
-                      stroke="#10b981"
-                      strokeWidth={2.5}
-                      dot={{ r: 4, strokeWidth: 1.5 }}
-                      activeDot={{ r: 6, strokeWidth: 0 }}
-                    />
-                    <Line
-                      yAxisId="right"
-                      type="monotone"
-                      name="Response Time (hrs)"
-                      dataKey="avgResponseHours"
-                      stroke="#8b5cf6"
-                      strokeWidth={2}
-                      strokeDasharray="5 5"
-                      dot={{ r: 3, strokeWidth: 1.5 }}
-                      activeDot={{ r: 5, strokeWidth: 0 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                {(!weeklyComplaints || weeklyComplaints.length === 0) ? (
+                  <div className="h-full w-full flex flex-col items-center justify-center text-center p-6 space-y-2 bg-slate-50/50 dark:bg-slate-950/20 rounded-xl border border-slate-100 dark:border-slate-800">
+                    <TrendingUp className="w-8 h-8 text-slate-300 dark:text-slate-600" />
+                    <p className="text-xs font-bold text-slate-600 dark:text-slate-400">No Weekly Escalations Logged</p>
+                    <p className="text-[10px] text-slate-400">Escalation and resolution trends will plot here as entries are created in the database.</p>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={weeklyComplaints}
+                      margin={{ top: 15, right: 10, left: -20, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.12)" />
+                      <XAxis 
+                        dataKey="week" 
+                        fontSize={9} 
+                        stroke="#94a3b8" 
+                        tickLine={false}
+                        axisLine={false} 
+                      />
+                      <YAxis 
+                        fontSize={9} 
+                        stroke="#94a3b8" 
+                        tickLine={false}
+                        axisLine={false} 
+                        yAxisId="left"
+                      />
+                      <YAxis 
+                        fontSize={9} 
+                        stroke="#94a3b8" 
+                        tickLine={false}
+                        axisLine={false} 
+                        yAxisId="right"
+                        orientation="right"
+                      />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend 
+                        verticalAlign="top" 
+                        height={36} 
+                        iconSize={8}
+                        iconType="circle"
+                        wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} 
+                      />
+                      <Line
+                        yAxisId="left"
+                        type="monotone"
+                        name="Escalated Complaints"
+                        dataKey="escalated"
+                        stroke="#ef4444"
+                        strokeWidth={2.5}
+                        dot={{ r: 4, strokeWidth: 1.5 }}
+                        activeDot={{ r: 6, strokeWidth: 0 }}
+                      />
+                      <Line
+                        yAxisId="left"
+                        type="monotone"
+                        name="Resolved Complaints"
+                        dataKey="resolved"
+                        stroke="#10b981"
+                        strokeWidth={2.5}
+                        dot={{ r: 4, strokeWidth: 1.5 }}
+                        activeDot={{ r: 6, strokeWidth: 0 }}
+                      />
+                      <Line
+                        yAxisId="right"
+                        type="monotone"
+                        name="Response Time (hrs)"
+                        dataKey="avgResponseHours"
+                        stroke="#8b5cf6"
+                        strokeWidth={2}
+                        strokeDasharray="5 5"
+                        dot={{ r: 3, strokeWidth: 1.5 }}
+                        activeDot={{ r: 5, strokeWidth: 0 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
               </div>
             </div>
 
@@ -1240,7 +2231,7 @@ export default function AdminLayout({
               <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border shadow-xs space-y-4">
                 <div>
                   <h4 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
-                    <Users className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <Users className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                     <span>User Directory Breakdown</span>
                   </h4>
                   <p className="text-[11px] text-slate-400 mt-1">
@@ -1321,7 +2312,7 @@ export default function AdminLayout({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
                 <div>
                   <h4 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
-                    <Database className="w-4.5 h-4.5 text-indigo-600 dark:text-indigo-400" />
+                    <Database className="w-4.5 h-4.5 text-emerald-600 dark:text-emerald-400" />
                     <span>Real-Time Database Telemetry Controls</span>
                   </h4>
                   <p className="text-[11px] text-slate-400 mt-1">
@@ -1331,20 +2322,14 @@ export default function AdminLayout({
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => {
-                      const defaults = [
-                        { week: 'W1 (May 10-16)', escalated: 3, resolved: 2, avgResponseHours: 4.2 },
-                        { week: 'W2 (May 17-23)', escalated: 7, resolved: 4, avgResponseHours: 3.5 },
-                        { week: 'W3 (May 24-30)', escalated: 12, resolved: 9, avgResponseHours: 2.8 },
-                        { week: 'W4 (May 31-Jun 08)', escalated: 8, resolved: 7, avgResponseHours: 1.9 }
-                      ];
-                      onUpdateWeeklyComplaints(defaults);
-                      onTriggerToast('Reset complaints database rows successfully!', 'success');
+                      onUpdateWeeklyComplaints([]);
+                      onTriggerToast('Reset complaints database table to baseline state.', 'info');
                     }}
                     className="px-2.5 py-1.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-750 dark:text-slate-350 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer"
-                    title="Reset to initial seed records"
+                    title="Clear complaints records"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Reset Database</span>
+                    <span>Clear Database</span>
                   </button>
                 </div>
               </div>
@@ -1352,7 +2337,7 @@ export default function AdminLayout({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Weekly complaints database adjustments */}
                 <div className="space-y-4">
-                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider block">Grievance & Escalation Sliders</span>
+                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">Grievance & Escalation Sliders</span>
                   <div className="space-y-3.5 bg-slate-50 dark:bg-slate-950/20 p-4 rounded-xl border border-slate-150 dark:border-slate-800">
                     {weeklyComplaints.map((item, index) => (
                       <div key={index} className="space-y-1.5">
@@ -1374,7 +2359,7 @@ export default function AdminLayout({
                                 updated[index] = { ...item, escalated: val };
                                 onUpdateWeeklyComplaints(updated);
                               }}
-                              className="w-full h-1 bg-slate-250 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-650"
+                              className="w-full h-1 bg-slate-250 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-600"
                             />
                           </div>
                           <div>
@@ -1410,7 +2395,7 @@ export default function AdminLayout({
                         onUpdateWeeklyComplaints(prev => [...prev, newWeek]);
                         onTriggerToast(`Appended new week W${nextNum} complaints record into Database!`, 'success');
                       }}
-                      className="w-full py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-950 text-indigo-600 dark:text-indigo-400 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="w-full py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-950 text-emerald-600 dark:text-emerald-400 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <Plus className="w-4 h-4" />
                       <span>Log New Complaints Week</span>
@@ -1468,7 +2453,7 @@ export default function AdminLayout({
                                 updated[updated.length - 1] = { ...updated[updated.length - 1], platformActions: val };
                                 onUpdateEngagementData(updated);
                               }}
-                              className="w-full h-1 bg-slate-250 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-650"
+                              className="w-full h-1 bg-slate-250 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-600"
                             />
                           </div>
                         </div>
@@ -1552,7 +2537,7 @@ export default function AdminLayout({
                         <tr key={log.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors">
                           <td className="px-4 py-3 text-slate-950 dark:text-white whitespace-nowrap font-bold text-[11px]">{log.timestamp}</td>
                           <td className="px-4 py-3 font-semibold text-slate-800 dark:text-slate-200">{log.metric}</td>
-                          <td className="px-4 py-3 font-black text-indigo-600 dark:text-indigo-400">{log.value}</td>
+                          <td className="px-4 py-3 font-black text-emerald-600 dark:text-emerald-400">{log.value}</td>
                           <td className="px-4 py-3">
                             <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
                               log.trend === 'Elevated' 
@@ -1587,7 +2572,7 @@ export default function AdminLayout({
             <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border shadow-xs space-y-4 animate-fade-in">
               <div>
                 <h4 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-indigo-600" />
+                  <FileText className="w-4 h-4 text-emerald-600" />
                   <span>Download Patient Clinician Summary</span>
                 </h4>
                 <p className="text-[11px] text-slate-400 mt-1">Select any registered patient below to compile and download their comprehensive historical biometrics and tele-care encounters report.</p>
@@ -1615,7 +2600,7 @@ export default function AdminLayout({
                     id="download-health-summary-btn"
                     onClick={handleDownloadHealthSummary}
                     disabled={patients.length === 0}
-                    className="py-2.5 px-5 bg-indigo-600 hover:bg-slate-900 text-white font-bold rounded-lg text-xs transition flex items-center justify-center gap-2 shadow-sm hover:shadow-md disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 disabled:shadow-none font-sans cursor-pointer"
+                    className="py-2.5 px-5 bg-emerald-600 hover:bg-slate-900 text-white font-bold rounded-lg text-xs transition flex items-center justify-center gap-2 shadow-sm hover:shadow-md disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 disabled:shadow-none font-sans cursor-pointer"
                   >
                     <Download className="w-4 h-4" />
                     <span>Generate Health Summary PDF</span>
@@ -1655,7 +2640,7 @@ export default function AdminLayout({
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
               <div>
                 <h4 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                  <Users className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                  <Users className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                   Outpatient Identity & Registry Controls
                 </h4>
                 <p className="text-[10px] text-slate-400 mt-0.5">Manage patient baselines, clinician licensing, and moderating sub-administrators</p>
@@ -1666,21 +2651,21 @@ export default function AdminLayout({
                 <button
                   type="button"
                   onClick={() => setActiveRegistrySubTab('patients')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeRegistrySubTab === 'patients' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeRegistrySubTab === 'patients' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}
                 >
                   Patients
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveRegistrySubTab('providers')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeRegistrySubTab === 'providers' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeRegistrySubTab === 'providers' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}
                 >
                   Providers
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveRegistrySubTab('sub_admins')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeRegistrySubTab === 'sub_admins' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeRegistrySubTab === 'sub_admins' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}
                 >
                   Sub Admins
                 </button>
@@ -1690,11 +2675,11 @@ export default function AdminLayout({
             {/* Active Session Protection Hub banner */}
             <div className="bg-slate-50 dark:bg-slate-900/60 p-4 rounded-xl border border-slate-200/85 dark:border-slate-800 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
               <div className="space-y-1">
-                <span className="text-[9px] bg-indigo-100 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-900/60 text-indigo-700 dark:text-indigo-400 px-2 py-0.5 rounded-md font-bold uppercase tracking-wider font-mono">
+                <span className="text-[9px] bg-emerald-100 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded-md font-bold uppercase tracking-wider font-mono">
                   ACTIVE SESSION PROTECTION HUB
                 </span>
                 <p className="text-xs font-bold text-slate-900 dark:text-white mt-1">
-                  Active Cryptographic Isolated Tunnels: <span className="font-mono text-indigo-600 dark:text-indigo-400 font-extrabold">{loggedInUserIds.length} users active</span>
+                  Active Cryptographic Isolated Tunnels: <span className="font-mono text-emerald-600 dark:text-emerald-400 font-extrabold">{loggedInUserIds.length} users active</span>
                 </p>
                 <p className="text-[10px] text-slate-400">
                   Data boundary verification audited under active HIPAA privacy frameworks.
@@ -1707,7 +2692,7 @@ export default function AdminLayout({
                   className="py-1.5 px-3 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg text-[9px] hover:bg-slate-50 font-extrabold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer select-none"
                   title="Rotate global keys for all active sessions"
                 >
-                  <RefreshCw className="w-3 h-3 text-indigo-500 animate-spin" />
+                  <RefreshCw className="w-3 h-3 text-emerald-500 animate-spin" />
                   <span>Rotate Cryptographic Keys</span>
                 </button>
               )}
@@ -1715,9 +2700,9 @@ export default function AdminLayout({
 
             {/* Provisioning Panels */}
             {activeRegistrySubTab === 'patients' && (session.role === 'admin') && (
-              <div className="bg-indigo-50/30 dark:bg-slate-900/40 p-5 rounded-xl border border-indigo-100 dark:border-slate-800 space-y-4 font-sans">
+              <div className="bg-emerald-50/30 dark:bg-slate-900/40 p-5 rounded-xl border border-emerald-100 dark:border-slate-800 space-y-4 font-sans">
                 <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 dark:bg-indigo-400 shrink-0 animate-pulse"></span>
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 dark:bg-emerald-400 shrink-0 animate-pulse"></span>
                   <div>
                     <h5 className="font-extrabold text-xs uppercase tracking-wider text-slate-900 dark:text-white leading-tight">
                       Provision New Patient Profile
@@ -1727,42 +2712,77 @@ export default function AdminLayout({
                 </div>
 
                 <form onSubmit={handleAdminAddUser} className="grid grid-cols-1 sm:grid-cols-4 gap-4 bg-white dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+                  {/* System User ID & First Name */}
                   <div className="space-y-1 col-span-1">
-                    <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Full Name</label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-[9px] font-extrabold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest block font-mono">User ID (0001-9999)</label>
+                      <span className="text-[8px] bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-mono font-bold px-1.5 py-0.2 rounded">Auto / 4-Digit</span>
+                    </div>
                     <input 
-                      type="text" required value={newUserName} onChange={(e) => setNewUserName(e.target.value)}
-                      placeholder="e.g. Ama Serwaa"
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
+                      type="text" 
+                      value={regCustomUserId} 
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '').slice(0, 4);
+                        setRegCustomUserId(val);
+                      }}
+                      placeholder={`Auto: ${generateUserId(users)}`}
+                      maxLength={4}
+                      className="w-full bg-slate-50 dark:bg-slate-900/80 border border-emerald-300 dark:border-emerald-700/60 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-mono font-bold text-emerald-700 dark:text-emerald-300 transition-all shadow-xs"
                     />
                   </div>
+
+                  <div className="space-y-1 col-span-1">
+                    <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">First Name</label>
+                    <input 
+                      type="text" required value={regFirstName} 
+                      onChange={(e) => {
+                        setRegFirstName(e.target.value);
+                        setNewUserName(`${e.target.value} ${regLastName}`.trim());
+                      }}
+                      placeholder="e.g. Ama"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1 col-span-1">
+                    <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Last Name</label>
+                    <input 
+                      type="text" required value={regLastName} 
+                      onChange={(e) => {
+                        setRegLastName(e.target.value);
+                        setNewUserName(`${regFirstName} ${e.target.value}`.trim());
+                      }}
+                      placeholder="e.g. Serwaa"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
+                    />
+                  </div>
+
                   <div className="space-y-1 col-span-1">
                     <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Email Address</label>
                     <input 
                       type="email" required value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)}
                       placeholder="e.g. ama.serwaa@example.com"
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
                     />
                   </div>
+
                   <div className="space-y-1 col-span-1">
                     <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Access Password</label>
                     <input 
                       type="text" required value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)}
                       placeholder="e.g. Ghana_Ahomka_24"
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
-                    />
-                  </div>
-                  <div className="space-y-1 col-span-1">
-                    <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Age</label>
-                    <input 
-                      type="number" required value={regAge} onChange={(e) => setRegAge(e.target.value)}
-                      placeholder="e.g. 38" min="1" max="110"
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
                     />
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Gender</label>
-                    <select value={regGender} onChange={(e) => setRegGender(e.target.value)}
+                  <div className="space-y-1 col-span-1">
+                    <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Sex</label>
+                    <select 
+                      value={regSex} 
+                      onChange={(e) => {
+                        setRegSex(e.target.value);
+                        setRegGender(e.target.value);
+                      }}
                       className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 py-1.5 px-2.5 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 h-[34px] cursor-pointer"
                     >
                       <option value="Female">Female</option>
@@ -1770,6 +2790,40 @@ export default function AdminLayout({
                       <option value="Other">Other</option>
                     </select>
                   </div>
+
+                  <div className="space-y-1 col-span-1">
+                    <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Date of Birth (DOB)</label>
+                    <input 
+                      type="date" 
+                      required 
+                      value={regDob} 
+                      onChange={(e) => {
+                        const newDob = e.target.value;
+                        setRegDob(newDob);
+                        if (newDob) {
+                          const birth = new Date(newDob);
+                          if (!isNaN(birth.getTime())) {
+                            const today = new Date();
+                            let age = today.getFullYear() - birth.getFullYear();
+                            const m = today.getMonth() - birth.getMonth();
+                            if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
+                            if (age >= 0 && age <= 130) setRegAge(String(age));
+                          }
+                        }
+                      }}
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-2.5 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 h-[34px] transition-all shadow-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1 col-span-1">
+                    <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Age (Years)</label>
+                    <input 
+                      type="number" required value={regAge} onChange={(e) => setRegAge(e.target.value)}
+                      placeholder="e.g. 38" min="1" max="110"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
+                    />
+                  </div>
+
                   <div className="space-y-1">
                     <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Marital Status</label>
                     <select value={regMarital} onChange={(e) => setRegMarital(e.target.value)}
@@ -1806,13 +2860,25 @@ export default function AdminLayout({
                       <option value="Spanish">Spanish</option>
                     </select>
                   </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Education Level</label>
+                    <select value={regEducation} onChange={(e) => setRegEducation(e.target.value)}
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 py-1.5 px-2.5 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 h-[34px] cursor-pointer"
+                    >
+                      <option value="Tertiary Degree">Tertiary / University Degree</option>
+                      <option value="Secondary Education">Secondary / High School</option>
+                      <option value="Vocational / Technical">Vocational / Technical</option>
+                      <option value="Primary Education">Primary Education</option>
+                      <option value="Postgraduate Degree">Postgraduate / Doctorate</option>
+                    </select>
+                  </div>
 
                   <div className="sm:col-span-2 space-y-1">
                     <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Street Address</label>
                     <input 
                       type="text" required value={regStreet} onChange={(e) => setRegStreet(e.target.value)}
                       placeholder="e.g. 15 Giffard Road"
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 h-[34px] transition-all text-left"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 h-[34px] transition-all text-left"
                     />
                   </div>
                   <div className="space-y-1">
@@ -1820,7 +2886,7 @@ export default function AdminLayout({
                     <input 
                       type="text" required value={regCity} onChange={(e) => setRegCity(e.target.value)}
                       placeholder="e.g. Cantonments"
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 h-[34px] transition-all text-left"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 h-[34px] transition-all text-left"
                     />
                   </div>
                   <div className="space-y-1">
@@ -1843,13 +2909,17 @@ export default function AdminLayout({
                     <button
                       type="button"
                       onClick={() => {
+                        setRegFirstName('Bernice');
+                        setRegLastName('Mensah');
                         setNewUserName('Bernice Mensah');
                         setNewUserEmail('bernice.mensah@gmail.com');
                         setNewUserPassword('GhanaAhomka_99');
+                        setRegSex('Female');
+                        setRegGender('Female');
+                        setRegDob('1982-08-20');
                         setRegAge('42');
                         setRegStreet('12 Castle Road');
                         setRegCity('Osu');
-                        setRegGender('Female');
                         setRegMarital('Married');
                         setRegEmployment('Employed');
                         setRegLanguage('English');
@@ -1861,7 +2931,7 @@ export default function AdminLayout({
                     </button>
                     <button
                       type="submit"
-                      className="py-2 px-5 bg-indigo-600 hover:bg-indigo-750 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-indigo-600/10"
+                      className="py-2 px-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-600/10"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>Provision Real Patient Account</span>
@@ -1889,7 +2959,7 @@ export default function AdminLayout({
                     <input 
                       type="text" required value={newUserName} onChange={(e) => setNewUserName(e.target.value)}
                       placeholder="e.g. Dr. Frank Jenkins"
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
                     />
                   </div>
                   <div className="space-y-1 col-span-1">
@@ -1897,7 +2967,7 @@ export default function AdminLayout({
                     <input 
                       type="email" required value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)}
                       placeholder="e.g. jenkins@curaflow.com"
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
                     />
                   </div>
                   <div className="space-y-1 col-span-1">
@@ -1905,7 +2975,7 @@ export default function AdminLayout({
                     <input 
                       type="text" required value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)}
                       placeholder="e.g. ClinicalSecure_24"
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
                     />
                   </div>
                   <div className="space-y-1 col-span-1">
@@ -1936,7 +3006,7 @@ export default function AdminLayout({
                     <input 
                       type="text" required value={regCity} onChange={(e) => setRegCity(e.target.value)}
                       placeholder="e.g. Accra"
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 h-[34px] transition-all text-left"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 h-[34px] transition-all text-left"
                     />
                   </div>
                   <div className="space-y-1">
@@ -1944,7 +3014,7 @@ export default function AdminLayout({
                     <input 
                       type="text" required value={regState} onChange={(e) => setRegState(e.target.value)}
                       placeholder="e.g. Greater Accra"
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 h-[34px] transition-all text-left"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 h-[34px] transition-all text-left"
                     />
                   </div>
 
@@ -1984,7 +3054,7 @@ export default function AdminLayout({
                       <input 
                         type="text" required value={newUserName} onChange={(e) => setNewUserName(e.target.value)}
                         placeholder="e.g. Carl Peterson"
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
                       />
                     </div>
                     <div className="space-y-1 col-span-1">
@@ -1992,7 +3062,7 @@ export default function AdminLayout({
                       <input 
                         type="email" required value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)}
                         placeholder="e.g. carl.admin@curaflow.com"
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
                       />
                     </div>
                     <div className="space-y-1 col-span-1">
@@ -2000,7 +3070,7 @@ export default function AdminLayout({
                       <input 
                         type="text" required value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)}
                         placeholder="e.g. SubAdminSecure_24"
-                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
                       />
                     </div>
                     <div className="space-y-1 col-span-1">
@@ -2056,7 +3126,7 @@ export default function AdminLayout({
 
                     {activeRegistrySubTab === 'sub_admins' && (
                       <>
-                        <th className="px-5 py-3 font-mono font-bold text-indigo-600 dark:text-indigo-400">Operations Focus</th>
+                        <th className="px-5 py-3 font-mono font-bold text-emerald-600 dark:text-emerald-400">Operations Focus</th>
                         <th className="px-5 py-3 font-mono">Socio-Status</th>
                         <th className="px-5 py-3 font-mono">Tunnels Active</th>
                       </>
@@ -2086,7 +3156,7 @@ export default function AdminLayout({
                             {u.avatar ? (
                               <img src={u.avatar} alt="avatar" className="w-8 h-8 rounded-full object-cover shrink-0" referrerPolicy="no-referrer" />
                             ) : (
-                              <div className="w-8 h-8 rounded-full bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 flex items-center justify-center font-black text-xs uppercase shrink-0">
+                              <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 flex items-center justify-center font-black text-xs uppercase shrink-0">
                                 {u.name.charAt(0)}
                               </div>
                             )}
@@ -2119,7 +3189,7 @@ export default function AdminLayout({
                               {patientLogs.length > 0 ? (
                                 <div className="flex flex-wrap gap-1.5 max-w-[180px]">
                                   {lastBP && (
-                                    <span className="bg-indigo-50 text-indigo-700 dark:bg-indigo-950/35 dark:text-indigo-300 px-1.5 py-0.5 rounded font-mono font-bold text-[9px]">
+                                    <span className="bg-emerald-50 text-emerald-700 dark:bg-emerald-950/35 dark:text-emerald-300 px-1.5 py-0.5 rounded font-mono font-bold text-[9px]">
                                       BP: {lastBP}
                                     </span>
                                   )}
@@ -2169,14 +3239,14 @@ export default function AdminLayout({
                           <>
                             <td className="px-5 py-3.5">
                               <p className="font-bold text-slate-800 dark:text-slate-205">{u.insuranceProvider || 'Auditing & Clinical Compliance Division'}</p>
-                              <p className="text-[9px] text-indigo-500 font-mono tracking-wider font-bold">SECURE LEVEL-1 ACCESS</p>
+                              <p className="text-[9px] text-emerald-500 font-mono tracking-wider font-bold">SECURE LEVEL-1 ACCESS</p>
                             </td>
                             <td className="px-5 py-3.5">
                               <p className="text-slate-800 dark:text-slate-200 font-semibold">{u.age || '40'} · {u.gender || 'Female'}</p>
                               <p className="text-[9px] text-slate-400 font-semibold">{u.maritalStatus || 'Married'}</p>
                             </td>
                             <td className="px-5 py-3.5 whitespace-nowrap">
-                              <span className="text-xs font-bold font-mono text-indigo-600 dark:text-indigo-400">Isolated Link OK</span>
+                              <span className="text-xs font-bold font-mono text-emerald-600 dark:text-emerald-400">Isolated Link OK</span>
                             </td>
                           </>
                         )}
@@ -2201,11 +3271,41 @@ export default function AdminLayout({
                         <td className="px-5 py-3.5 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1.5">
                             
+                            {u.role === 'patient' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setLogReadingsPatient(u);
+                                  setAdminSys1(120);
+                                  setAdminSys2(120);
+                                  setAdminSys3(120);
+                                  setAdminDia1(80);
+                                  setAdminDia2(80);
+                                  setAdminDia3(80);
+                                  setAdminPulse1(72);
+                                  setAdminPulse2(72);
+                                  setAdminPulse3(72);
+                                  setReadGlucose('');
+                                  setReadMood(8);
+                                  setReadStress(3);
+                                  setReadPain(1);
+                                  setReadSymptoms(['Normal / Stable']);
+                                  setReadAdherence('Full Adherence');
+                                  setReadNotes('');
+                                }}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-lg text-[10px] transition cursor-pointer flex items-center gap-1 shadow-xs"
+                                title="Log BP, heart rate, symptoms & vitals for this patient"
+                              >
+                                <Activity className="w-3 h-3" />
+                                <span>Log Readings</span>
+                              </button>
+                            )}
+
                             {/* Socio-demographic detail view - accessible for super admin and sub-administrator alike */}
                             <button
                               type="button"
                               onClick={() => setSelectedProfileUser(u)}
-                              className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/50 dark:bg-indigo-950/35 dark:hover:bg-indigo-900/50 dark:text-indigo-300 dark:border-indigo-900/60 font-extrabold rounded-lg text-[10px] transition cursor-pointer"
+                              className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/50 dark:bg-emerald-950/35 dark:hover:bg-emerald-900/50 dark:text-emerald-300 dark:border-emerald-900/60 font-extrabold rounded-lg text-[10px] transition cursor-pointer"
                               title="Show detailed sociodemographic and baseline diagnostics summary"
                             >
                               Socio-Demog Profile
@@ -2230,7 +3330,7 @@ export default function AdminLayout({
                                     onModifyUserStatus(u.id, u.status !== 'Suspended');
                                     onTriggerToast(`Lock status toggled: ${u.name}`, 'info');
                                   }}
-                                  className={`px-2 py-1 text-[10px] font-bold rounded transition cursor-pointer ${u.status === 'Suspended' ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-red-50 dark:bg-red-950/20 text-red-600 hover:bg-red-100 dark:hover:bg-red-950/30 dark:text-red-400'}`}
+                                  className={`px-2 py-1 text-[10px] font-bold rounded transition cursor-pointer ${u.status === 'Suspended' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-red-50 dark:bg-red-950/20 text-red-600 hover:bg-red-100 dark:hover:bg-red-950/30 dark:text-red-400'}`}
                                 >
                                   {u.status === 'Suspended' ? 'Restore Workspace' : 'Suspend Account'}
                                 </button>
@@ -2330,7 +3430,7 @@ export default function AdminLayout({
                 <button 
                   id="adm-cms-submit"
                   type="submit" 
-                  className="w-full py-2 bg-indigo-600 hover:bg-slate-900 text-white font-bold rounded-lg text-xs transition flex items-center justify-center gap-1"
+                  className="w-full py-2 bg-emerald-600 hover:bg-slate-900 text-white font-bold rounded-lg text-xs transition flex items-center justify-center gap-1"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Publish Article</span>
@@ -2347,9 +3447,9 @@ export default function AdminLayout({
 
               <div className="space-y-3">
                 {articles.map(art => (
-                  <div key={art.id} className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs transition hover:border-indigo-200">
+                  <div key={art.id} className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs transition hover:border-emerald-200">
                     <div className="space-y-1.5 max-w-md">
-                      <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-bold tracking-widest uppercase">{art.category}</span>
+                      <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-bold tracking-widest uppercase">{art.category}</span>
                       <h5 className="font-bold text-slate-900 dark:text-white leading-snug">{art.title}</h5>
                       <p className="text-slate-400 dark:text-slate-500 text-[10.5px] leading-relaxed truncate">{art.summary}</p>
                     </div>
@@ -2366,7 +3466,7 @@ export default function AdminLayout({
                           onArchiveArticle(art.id, !art.isArchived);
                           onTriggerToast(`Article archive status toggled`, 'info');
                         }}
-                        className={`p-1 px-3.5 rounded text-[10px] font-bold transition ${art.isArchived ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200'}`}
+                        className={`p-1 px-3.5 rounded text-[10px] font-bold transition ${art.isArchived ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200'}`}
                       >
                         {art.isArchived ? 'Activate' : 'Archive'}
                       </button>
@@ -2384,7 +3484,7 @@ export default function AdminLayout({
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
             {/* Broadcaster deployment container */}
-            <div className="bg-[#581C87] text-purple-100 rounded-2xl p-6 shadow-xl border border-purple-900/45 self-start space-y-4">
+            <div className="bg-slate-950 text-purple-100 rounded-2xl p-6 shadow-xl border border-purple-900/45 self-start space-y-4">
               <div>
                 <h4 className="font-bold text-xs text-purple-50">Transmit Emergency Broadcast Notice</h4>
                 <p className="text-[10px] text-purple-200 mt-1">Simulates pushing an instant alert warning dynamically across screens</p>
@@ -2437,7 +3537,7 @@ export default function AdminLayout({
                     <textarea value={annContent} onChange={(e) => setAnnContent(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 py-2 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-white" placeholder="Full context bulletins..." rows={2} required />
                   </div>
 
-                  <button type="submit" className="bg-indigo-600 hover:bg-slate-900 text-white font-bold py-2 px-4 rounded-lg text-xs transition">
+                  <button type="submit" className="bg-emerald-600 hover:bg-slate-900 text-white font-bold py-2 px-4 rounded-lg text-xs transition">
                     Deploy Announcement
                   </button>
                 </form>
@@ -2450,7 +3550,7 @@ export default function AdminLayout({
                   {announcements.map(an => (
                     <div key={an.id} className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-100 dark:border-slate-800 flex items-start justify-between text-xs">
                       <div>
-                        <span className="text-[8.5px] bg-indigo-50 dark:bg-indigo-950/45 text-indigo-700 dark:text-indigo-300 font-bold px-1.5 py-0.5 rounded capitalize">Target: {an.targetRole}</span>
+                        <span className="text-[8.5px] bg-emerald-50 dark:bg-emerald-950/45 text-emerald-700 dark:text-emerald-300 font-bold px-1.5 py-0.5 rounded capitalize">Target: {an.targetRole}</span>
                         <h5 className="font-bold text-slate-900 dark:text-white mt-1">{an.title}</h5>
                         <p className="text-slate-600 dark:text-slate-300 mt-1">{an.content}</p>
                       </div>
@@ -2488,7 +3588,7 @@ export default function AdminLayout({
                     <option value="Billing">Insurance & Plans</option>
                   </select>
                 </div>
-                <button type="submit" className="w-full py-2 bg-indigo-600 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition">
+                <button type="submit" className="w-full py-2 bg-emerald-600 hover:bg-slate-900 text-white rounded-lg text-xs font-bold transition">
                   Publish FAQ
                 </button>
               </form>
@@ -2500,7 +3600,7 @@ export default function AdminLayout({
                 {faqs.map(f => (
                   <div key={f.id} className="py-3.5 first:pt-0 last:pb-0 text-xs text-slate-700 dark:text-slate-300">
                     <h5 className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                      <span className="text-indigo-600 dark:text-indigo-400 font-bold">Q:</span>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-bold">Q:</span>
                       <span>{f.question}</span>
                     </h5>
                     <p className="text-slate-500 dark:text-slate-400 leading-relaxed mt-1.5 pl-4">{f.answer}</p>
@@ -2518,7 +3618,7 @@ export default function AdminLayout({
             <div className="flex justify-between items-center pb-2 border-b shrink-0">
               <div>
                 <h4 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
-                  <Server className="w-4.5 h-4.5 text-indigo-600" />
+                  <Server className="w-4.5 h-4.5 text-emerald-600" />
                   <span>HIPAA Compliance Diagnostics & Administration Hub</span>
                 </h4>
                 <p className="text-[10px] text-slate-400">Chronological telemetry trails, interactive CSV data extraction, and role compliance permissions grid</p>
@@ -2532,7 +3632,7 @@ export default function AdminLayout({
               {/* PANEL 1: Interactive Data Extraction Suite */}
               <div className="bg-slate-50 dark:bg-slate-950/40 p-5 rounded-xl border border-slate-200/50 dark:border-slate-800 space-y-4 text-xs">
                 <div className="flex items-center gap-2">
-                  <Download className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                  <Download className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                   <div>
                     <h5 className="font-bold text-xs text-slate-900 dark:text-white tracking-tight">HIPAA Secure Dataset Extraction Suite</h5>
                     <p className="text-[10px] text-slate-400 dark:text-slate-400 leading-none">Download cryptographically isolated CSV or JSON summaries</p>
@@ -2545,7 +3645,7 @@ export default function AdminLayout({
                     <select
                       value={exportDataType}
                       onChange={(e: any) => setExportDataType(e.target.value)}
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold p-2 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold p-2 focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                     >
                       <option value="all">Comprehensive Bundle (All)</option>
                       <option value="patients">Secured Patient Registry</option>
@@ -2559,7 +3659,7 @@ export default function AdminLayout({
                     <select
                       value={exportFormat}
                       onChange={(e: any) => setExportFormat(e.target.value)}
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold p-2 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold p-2 focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                     >
                       <option value="csv">Structured Spreadsheet (.CSV)</option>
                       <option value="json">Raw HIPAA Payload (.JSON)</option>
@@ -2571,7 +3671,7 @@ export default function AdminLayout({
                     <select
                       value={exportDateRange}
                       onChange={(e: any) => setExportDateRange(e.target.value)}
-                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold p-2 focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-xs font-semibold p-2 focus:ring-1 focus:ring-emerald-500 focus:outline-none"
                     >
                       <option value="all">Full Baseline History</option>
                       <option value="30days">Active Month (Last 30 days)</option>
@@ -2584,7 +3684,7 @@ export default function AdminLayout({
                       type="button"
                       onClick={handleTriggerExport}
                       disabled={isRefreshingExporter}
-                      className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white dark:bg-indigo-500 dark:hover:bg-indigo-600 rounded-lg text-xs font-bold tracking-wide transition-all shadow-xs shrink-0 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-emerald-500 dark:hover:bg-emerald-600 rounded-lg text-xs font-bold tracking-wide transition-all shadow-xs shrink-0 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                     >
                       {isRefreshingExporter ? (
                         <>
@@ -2611,7 +3711,7 @@ export default function AdminLayout({
               {/* PANEL 2: Clinical Risk Evaluation Configuration */}
               <div className="bg-slate-50 dark:bg-slate-950/40 p-5 rounded-xl border border-slate-200/50 dark:border-slate-800 space-y-4">
                 <div className="flex items-center gap-2 text-xs">
-                  <Settings className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                  <Settings className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                   <div>
                     <h5 className="font-bold text-xs text-slate-900 dark:text-white tracking-tight">Active Clinical Risk Evaluation Limits</h5>
                     <p className="text-[10px] text-slate-400 dark:text-slate-400 leading-none">Configure parameters for automatic real-time high-risk flagged alerts</p>
@@ -2622,7 +3722,7 @@ export default function AdminLayout({
                   <div className="space-y-1">
                     <div className="flex justify-between text-[10px] font-bold text-slate-500 font-sans">
                       <span>HIGH RISK SYSTOLIC BOUNDARY</span>
-                      <span className="font-mono text-indigo-600 dark:text-indigo-400">≥ {systolicThreshold} mmHg</span>
+                      <span className="font-mono text-emerald-600 dark:text-emerald-400">≥ {systolicThreshold} mmHg</span>
                     </div>
                     <input 
                       type="range" 
@@ -2633,14 +3733,14 @@ export default function AdminLayout({
                         setSystolicThreshold(parseInt(e.target.value));
                         onTriggerToast(`Global Systolic target updated to ${e.target.value} mmHg`, 'success');
                       }}
-                      className="w-full accent-indigo-600 dark:accent-indigo-500 cursor-pointer text-xs"
+                      className="w-full accent-emerald-600 dark:accent-emerald-500 cursor-pointer text-xs"
                     />
                   </div>
 
                   <div className="space-y-1">
                     <div className="flex justify-between text-[10px] font-bold text-slate-500 font-sans">
                       <span>HIGH RISK DIASTOLIC BOUNDARY</span>
-                      <span className="font-mono text-indigo-600 dark:text-indigo-400">≥ {diastolicThreshold} mmHg</span>
+                      <span className="font-mono text-emerald-600 dark:text-emerald-400">≥ {diastolicThreshold} mmHg</span>
                     </div>
                     <input 
                       type="range" 
@@ -2651,7 +3751,7 @@ export default function AdminLayout({
                         setDiastolicThreshold(parseInt(e.target.value));
                         onTriggerToast(`Global Diastolic target updated to ${e.target.value} mmHg`, 'success');
                       }}
-                      className="w-full accent-indigo-600 dark:accent-indigo-500 cursor-pointer text-xs"
+                      className="w-full accent-emerald-600 dark:accent-emerald-500 cursor-pointer text-xs"
                     />
                   </div>
                 </div>
@@ -2666,7 +3766,7 @@ export default function AdminLayout({
             {/* SECURITY ROLE & PERMISSION MATRIX */}
             <div className="bg-slate-50 dark:bg-slate-950/20 p-5 rounded-xl border border-slate-200/50 dark:border-slate-800 space-y-3">
               <div className="flex items-center gap-2">
-                <Activity className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                <Activity className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                 <div>
                   <h5 className="font-bold text-xs text-slate-900 dark:text-white tracking-tight">HIPAA Role-Based Access Control (RBAC) Verification Matrix</h5>
                   <p className="text-[10px] text-slate-400">Visual audit matrices proving segregation of clinical duties across client platforms</p>
@@ -2744,9 +3844,9 @@ export default function AdminLayout({
                   {auditLogs.map((aud, idx) => (
                     <tr key={`${aud.id}-${idx}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition-colors">
                       <td className="px-4 py-3 text-slate-950 dark:text-white whitespace-nowrap font-bold">{aud.timestamp}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-indigo-600 dark:text-indigo-400 font-bold">{aud.userName} ({aud.userRole})</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-emerald-600 dark:text-emerald-400 font-bold">{aud.userName} ({aud.userRole})</td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <span className="bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded font-black text-[9.5px]">
+                        <span className="bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded font-black text-[9.5px]">
                           {aud.action}
                         </span>
                       </td>
@@ -2807,12 +3907,12 @@ export default function AdminLayout({
             <div className="flex justify-between items-center pb-2 border-b">
               <div>
                 <h4 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
-                  <Users className="w-4.5 h-4.5 text-indigo-600" />
+                  <Users className="w-4.5 h-4.5 text-emerald-600" />
                   <span>Support Forum Boards & Community Moderator</span>
                 </h4>
                 <p className="text-[10px] text-slate-400">System Admin & Sub-Admin authorized board designer to spawn and moderate peer-to-peer discussion channels instantly</p>
               </div>
-              <span className="text-[9px] font-mono px-2.5 py-1 rounded bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-300 font-bold">Admin Panel v1.2</span>
+              <span className="text-[9px] font-mono px-2.5 py-1 rounded bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-300 font-bold">Admin Panel v1.2</span>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -2865,7 +3965,7 @@ export default function AdminLayout({
                       type="text"
                       required
                       placeholder="#cardio-wellness"
-                      className="w-full bg-white dark:bg-slate-800 border rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-600 text-slate-900 dark:text-white"
+                      className="w-full bg-white dark:bg-slate-800 border rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-emerald-600 text-slate-900 dark:text-white"
                     />
                   </div>
 
@@ -2876,7 +3976,7 @@ export default function AdminLayout({
                       type="text"
                       required
                       placeholder="Maternal Wellness Discussion"
-                      className="w-full bg-white dark:bg-slate-800 border rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-600 text-slate-900 dark:text-white"
+                      className="w-full bg-white dark:bg-slate-800 border rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-emerald-600 text-slate-900 dark:text-white"
                     />
                   </div>
 
@@ -2887,13 +3987,13 @@ export default function AdminLayout({
                       required
                       rows={3}
                       placeholder="Discuss pre-natal parameters, local midwife services, and post-intake blood pressure readings with fellow mothers."
-                      className="w-full bg-white dark:bg-slate-800 border rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-indigo-600 text-slate-900 dark:text-white"
+                      className="w-full bg-white dark:bg-slate-800 border rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-emerald-600 text-slate-900 dark:text-white"
                     />
                   </div>
 
                   <button
                     type="submit"
-                    className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-all shadow-md shadow-indigo-600/10 cursor-pointer flex items-center justify-center gap-1.5"
+                    className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition-all shadow-md shadow-emerald-600/10 cursor-pointer flex items-center justify-center gap-1.5"
                   >
                     <Plus className="w-4 h-4" />
                     <span>Deploy Support Board</span>
@@ -2909,8 +4009,8 @@ export default function AdminLayout({
                     <div key={board.id} className="bg-slate-50 dark:bg-slate-950/20 p-4 rounded-xl border border-slate-200/40 dark:border-slate-800 flex flex-col justify-between">
                       <div>
                         <div className="flex justify-between items-start gap-1">
-                          <span className="font-bold text-xs text-indigo-600 dark:text-indigo-400 select-all">{board.id}</span>
-                          <span className="text-[8px] bg-indigo-55 text-indigo-700 px-1.5 py-0.5 rounded uppercase font-black">ACTIVE</span>
+                          <span className="font-bold text-xs text-emerald-600 dark:text-emerald-400 select-all">{board.id}</span>
+                          <span className="text-[8px] bg-emerald-55 text-emerald-700 px-1.5 py-0.5 rounded uppercase font-black">ACTIVE</span>
                         </div>
                         <h6 className="font-bold text-slate-900 dark:text-white text-xs mt-1 leading-tight">{board.label}</h6>
                         <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed mt-1">{board.desc}</p>
@@ -2935,12 +4035,12 @@ export default function AdminLayout({
             <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800">
               <div>
                 <h4 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
-                  <Briefcase className="w-4.5 h-4.5 text-indigo-600" />
+                  <Briefcase className="w-4.5 h-4.5 text-emerald-600" />
                   <span>Department Head Desk & Operations Hub</span>
                 </h4>
                 <p className="text-[10px] text-slate-400">Review departmental standing, active operational units, and pending escalated complaints tracking</p>
               </div>
-              <span className="text-[9px] font-mono px-2.5 py-1 rounded bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-300 font-bold">Secure Ops v2.4</span>
+              <span className="text-[9px] font-mono px-2.5 py-1 rounded bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-300 font-bold">Secure Ops v2.4</span>
             </div>
 
             {/* Stats and Chart grid */}
@@ -2971,28 +4071,18 @@ export default function AdminLayout({
                 <div className="bg-slate-50 dark:bg-slate-950/20 p-4 rounded-xl border border-slate-200/50 dark:border-slate-800/60 space-y-3">
                   <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Critical Escalated Alerts</span>
                   <div className="space-y-2 text-[11px]">
-                    {totalEscalations === 0 ? (
+                    {realCriticalAlerts.length === 0 ? (
                       <p className="text-xs text-slate-500 py-4 text-center dark:text-slate-400">No active critical escalated alerts. System healthy.</p>
                     ) : (
-                      (() => {
-                        const alertsTemplates = [
-                          { title: "Pre-natal BP chart failure", category: "Clinical Quality", age: "2h ago" },
-                          { title: "Disputed copay billing charge", category: "Billing & Insurance", age: "5h ago" },
-                          { title: "Somatic ECG synchronizer lag", category: "Clinical Quality", age: "12h ago" },
-                          { title: "Fasting glucose telemetry drop", category: "Technical Support", age: "1d ago" },
-                          { title: "Maternity ward check-in delay", category: "Waiting Times", age: "2d ago" }
-                        ];
-                        const countToShow = Math.max(1, Math.min(totalEscalations, alertsTemplates.length));
-                        return alertsTemplates.slice(0, countToShow).map((alert, idx) => (
-                          <div key={idx} className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/80 rounded-lg flex items-start gap-2 text-left animate-pulse">
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0 mt-1.5" />
-                            <div>
-                              <p className="font-bold text-slate-800 dark:text-slate-200 leading-tight">{alert.title}</p>
-                              <p className="text-[9px] text-slate-400 mt-0.5">{alert.category} · Escalated {alert.age}</p>
-                            </div>
+                      realCriticalAlerts.slice(0, 5).map((alert, idx) => (
+                        <div key={idx} className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/80 rounded-lg flex items-start gap-2 text-left">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0 mt-1.5" />
+                          <div>
+                            <p className="font-bold text-slate-800 dark:text-slate-200 leading-tight">{alert.title}</p>
+                            <p className="text-[9px] text-slate-400 mt-0.5">{alert.category} · {alert.age}</p>
                           </div>
-                        ));
-                      })()
+                        </div>
+                      ))
                     )}
                   </div>
                 </div>
@@ -3002,35 +4092,43 @@ export default function AdminLayout({
               <div className="lg:col-span-2 space-y-4">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Complaints Category Distribution</span>
-                  <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-bold font-mono">Telemetry Chart</span>
+                  <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-bold font-mono">Telemetry Chart</span>
                 </div>
                 
                 <div className="bg-slate-50 dark:bg-slate-950/25 border border-slate-150 dark:border-slate-800/80 p-4 rounded-xl">
                   <div className="h-[270px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={(() => {
-                        const categories = [
-                          { name: 'Clinical Quality', pendingRatio: 0.21, escalatedRatio: 0.18 },
-                          { name: 'Billing/Insurance', pendingRatio: 0.33, escalatedRatio: 0.36 },
-                          { name: 'Technical Support', pendingRatio: 0.13, escalatedRatio: 0.09 },
-                          { name: 'Waiting Times', pendingRatio: 0.25, escalatedRatio: 0.27 },
-                          { name: 'Staff Behavior', pendingRatio: 0.08, escalatedRatio: 0.10 }
-                        ];
-                        return categories.map(cat => ({
-                          name: cat.name,
-                          pending: Math.max(0, Math.round(unresolvedEscalations * cat.pendingRatio)),
-                          escalated: Math.max(0, Math.round(totalEscalations * cat.escalatedRatio))
-                        }));
-                      })()} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-                        <XAxis dataKey="name" stroke="#64748B" fontSize={9} tickLine={false} />
-                        <YAxis stroke="#64748B" fontSize={9} tickLine={false} />
-                        <Tooltip content={<CustomTooltip />} />
-                        <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
-                        <Bar dataKey="pending" name="Pending Investigation" fill="#6366F1" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="escalated" name="Escalated Status" fill="#EF4444" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    {(!weeklyComplaints || weeklyComplaints.length === 0 || (totalEscalations === 0 && unresolvedEscalations === 0)) ? (
+                      <div className="h-full w-full flex flex-col items-center justify-center text-center p-6 space-y-2">
+                        <ShieldAlert className="w-8 h-8 text-slate-300 dark:text-slate-600" />
+                        <p className="text-xs font-bold text-slate-600 dark:text-slate-400">No Complaints Recorded in Database</p>
+                        <p className="text-[10px] text-slate-400">Category telemetry distribution will chart automatically when complaints are logged.</p>
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={(() => {
+                          const categories = [
+                            { name: 'Clinical Quality', pendingRatio: 0.21, escalatedRatio: 0.18 },
+                            { name: 'Billing/Insurance', pendingRatio: 0.33, escalatedRatio: 0.36 },
+                            { name: 'Technical Support', pendingRatio: 0.13, escalatedRatio: 0.09 },
+                            { name: 'Waiting Times', pendingRatio: 0.25, escalatedRatio: 0.27 },
+                            { name: 'Staff Behavior', pendingRatio: 0.08, escalatedRatio: 0.10 }
+                          ];
+                          return categories.map(cat => ({
+                            name: cat.name,
+                            pending: Math.max(0, Math.round(unresolvedEscalations * cat.pendingRatio)),
+                            escalated: Math.max(0, Math.round(totalEscalations * cat.escalatedRatio))
+                          }));
+                        })()} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                          <XAxis dataKey="name" stroke="#64748B" fontSize={9} tickLine={false} />
+                          <YAxis stroke="#64748B" fontSize={9} tickLine={false} />
+                          <Tooltip content={<CustomTooltip />} />
+                          <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
+                          <Bar dataKey="pending" name="Pending Investigation" fill="#6366F1" radius={[4, 4, 0, 0]} />
+                          <Bar dataKey="escalated" name="Escalated Status" fill="#EF4444" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
                   </div>
                 </div>
               </div>
@@ -3048,75 +4146,83 @@ export default function AdminLayout({
               
               <div className="bg-slate-50 dark:bg-slate-950/25 border border-slate-150 dark:border-slate-800/80 p-4 rounded-xl">
                 <div className="h-[270px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart
-                      data={weeklyComplaints}
-                      margin={{ top: 15, right: 10, left: -20, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.12)" />
-                      <XAxis 
-                        dataKey="week" 
-                        fontSize={9} 
-                        stroke="#94a3b8" 
-                        tickLine={false}
-                        axisLine={false} 
-                      />
-                      <YAxis 
-                        fontSize={9} 
-                        stroke="#94a3b8" 
-                        tickLine={false}
-                        axisLine={false} 
-                        yAxisId="left"
-                      />
-                      <YAxis 
-                        fontSize={9} 
-                        stroke="#94a3b8" 
-                        tickLine={false}
-                        axisLine={false} 
-                        yAxisId="right"
-                        orientation="right"
-                      />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Legend 
-                        verticalAlign="top" 
-                        height={36} 
-                        iconSize={8}
-                        iconType="circle"
-                        wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} 
-                      />
-                      <Line
-                        yAxisId="left"
-                        type="monotone"
-                        name="Escalated Complaints"
-                        dataKey="escalated"
-                        stroke="#ef4444"
-                        strokeWidth={2.5}
-                        dot={{ r: 4, strokeWidth: 1.5 }}
-                        activeDot={{ r: 6, strokeWidth: 0 }}
-                      />
-                      <Line
-                        yAxisId="left"
-                        type="monotone"
-                        name="Resolved Complaints"
-                        dataKey="resolved"
-                        stroke="#10b981"
-                        strokeWidth={2.5}
-                        dot={{ r: 4, strokeWidth: 1.5 }}
-                        activeDot={{ r: 6, strokeWidth: 0 }}
-                      />
-                      <Line
-                        yAxisId="right"
-                        type="monotone"
-                        name="Response Time (hrs)"
-                        dataKey="avgResponseHours"
-                        stroke="#8b5cf6"
-                        strokeWidth={2}
-                        strokeDasharray="5 5"
-                        dot={{ r: 3, strokeWidth: 1.5 }}
-                        activeDot={{ r: 5, strokeWidth: 0 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                  {(!weeklyComplaints || weeklyComplaints.length === 0) ? (
+                    <div className="h-full w-full flex flex-col items-center justify-center text-center p-6 space-y-2">
+                      <TrendingUp className="w-8 h-8 text-slate-300 dark:text-slate-600" />
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-400">No Weekly Escalation Records</p>
+                      <p className="text-[10px] text-slate-400">Weekly complaint and resolution volume will appear here once telemetry is recorded.</p>
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart
+                        data={weeklyComplaints}
+                        margin={{ top: 15, right: 10, left: -20, bottom: 5 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.12)" />
+                        <XAxis 
+                          dataKey="week" 
+                          fontSize={9} 
+                          stroke="#94a3b8" 
+                          tickLine={false}
+                          axisLine={false} 
+                        />
+                        <YAxis 
+                          fontSize={9} 
+                          stroke="#94a3b8" 
+                          tickLine={false}
+                          axisLine={false} 
+                          yAxisId="left"
+                        />
+                        <YAxis 
+                          fontSize={9} 
+                          stroke="#94a3b8" 
+                          tickLine={false}
+                          axisLine={false} 
+                          yAxisId="right"
+                          orientation="right"
+                        />
+                        <Tooltip content={<CustomTooltip />} />
+                        <Legend 
+                          verticalAlign="top" 
+                          height={36} 
+                          iconSize={8}
+                          iconType="circle"
+                          wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} 
+                        />
+                        <Line
+                          yAxisId="left"
+                          type="monotone"
+                          name="Escalated Complaints"
+                          dataKey="escalated"
+                          stroke="#ef4444"
+                          strokeWidth={2.5}
+                          dot={{ r: 4, strokeWidth: 1.5 }}
+                          activeDot={{ r: 6, strokeWidth: 0 }}
+                        />
+                        <Line
+                          yAxisId="left"
+                          type="monotone"
+                          name="Resolved Complaints"
+                          dataKey="resolved"
+                          stroke="#10b981"
+                          strokeWidth={2.5}
+                          dot={{ r: 4, strokeWidth: 1.5 }}
+                          activeDot={{ r: 6, strokeWidth: 0 }}
+                        />
+                        <Line
+                          yAxisId="right"
+                          type="monotone"
+                          name="Response Time (hrs)"
+                          dataKey="avgResponseHours"
+                          stroke="#8b5cf6"
+                          strokeWidth={2}
+                          strokeDasharray="5 5"
+                          dot={{ r: 3, strokeWidth: 1.5 }}
+                          activeDot={{ r: 5, strokeWidth: 0 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
                 </div>
               </div>
             </div>
@@ -3159,7 +4265,7 @@ export default function AdminLayout({
                 </div>
               </div>
               <p className="text-[10px] text-slate-400 font-medium font-mono truncate">
-                ID Reference: <span className="text-slate-600 dark:text-indigo-400 font-bold">{pendingDeleteUser.id}</span>
+                ID Reference: <span className="text-slate-600 dark:text-emerald-400 font-bold">{pendingDeleteUser.id}</span>
               </p>
             </div>
 
@@ -3196,13 +4302,13 @@ export default function AdminLayout({
             {/* Header */}
             <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-xl">
+                <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-xl">
                   <UserCheck className="w-6 h-6" />
                 </div>
                 <div>
                   <h4 className="font-bold text-sm text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
                     <span>Socio-Demographical Health Profile</span>
-                    <span className="text-[9px] font-mono font-black uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300">
+                    <span className="text-[9px] font-mono font-black uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300">
                       {selectedProfileUser.role}
                     </span>
                   </h4>
@@ -3224,7 +4330,7 @@ export default function AdminLayout({
               {/* SECTION 1: Personal Socio-Demographics */}
               <div className="space-y-4 bg-slate-50 dark:bg-slate-950/15 p-4 rounded-xl border border-slate-200/50 dark:border-slate-800/60">
                 <div className="flex items-center gap-2 pb-2 border-b border-slate-200/50 dark:border-slate-800/80">
-                  <Users className="w-4 h-4 text-indigo-500" />
+                  <Users className="w-4 h-4 text-emerald-500" />
                   <h5 className="font-bold uppercase text-[10px] text-slate-500 tracking-wider">Demographic Profile</h5>
                 </div>
 
@@ -3232,14 +4338,19 @@ export default function AdminLayout({
                   {/* Avatar & Identifiers */}
                   <div className="flex items-center gap-3">
                     {selectedProfileUser.avatar ? (
-                      <img src={selectedProfileUser.avatar} alt="avatar" className="w-11 h-11 rounded-full object-cover border-2 border-indigo-200 dark:border-indigo-950" />
+                      <img src={selectedProfileUser.avatar} alt="avatar" className="w-11 h-11 rounded-full object-cover border-2 border-emerald-200 dark:border-emerald-950" />
                     ) : (
-                      <div className="w-11 h-11 rounded-full bg-indigo-100 dark:bg-indigo-950 flex items-center justify-center text-indigo-700 dark:text-indigo-300 font-bold text-sm uppercase">
+                      <div className="w-11 h-11 rounded-full bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center text-emerald-700 dark:text-emerald-300 font-bold text-sm uppercase">
                         {selectedProfileUser.name.charAt(0)}
                       </div>
                     )}
                     <div>
-                      <p className="font-bold text-xs text-slate-900 dark:text-white leading-none mb-1">{selectedProfileUser.name}</p>
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <p className="font-bold text-xs text-slate-900 dark:text-white leading-none">{selectedProfileUser.name}</p>
+                        <span className="text-[9px] bg-emerald-100 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 font-mono font-black px-1.5 py-0.2 rounded">
+                          ID: {formatUserId(selectedProfileUser.id)}
+                        </span>
+                      </div>
                       <p className="text-[10.5px] text-slate-400 font-medium font-mono">{selectedProfileUser.email}</p>
                     </div>
                   </div>
@@ -3247,20 +4358,29 @@ export default function AdminLayout({
                   {/* Demographic Fields Grid */}
                   <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 pt-1">
                     <div>
-                      <span className="text-[9px] font-semibold text-slate-400 uppercase font-mono block">Baseline Age</span>
-                      <p className="font-bold text-slate-800 dark:text-slate-200">{selectedProfileUser.age || '38'} years old</p>
+                      <span className="text-[9px] font-semibold text-slate-400 uppercase font-mono block">First & Last Name</span>
+                      <p className="font-bold text-slate-800 dark:text-slate-200">
+                        {selectedProfileUser.firstName || selectedProfileUser.name.split(' ')[0]} {selectedProfileUser.lastName || selectedProfileUser.name.split(' ').slice(1).join(' ')}
+                      </p>
                     </div>
                     <div>
-                      <span className="text-[9px] font-semibold text-slate-400 uppercase font-mono block">Biological Gender</span>
-                      <p className="font-bold text-slate-800 dark:text-slate-200">{selectedProfileUser.gender || 'Female'}</p>
+                      <span className="text-[9px] font-semibold text-slate-400 uppercase font-mono block">Biological Sex</span>
+                      <p className="font-bold text-slate-800 dark:text-slate-200">{selectedProfileUser.sex || selectedProfileUser.gender || 'Female'}</p>
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-semibold text-slate-400 uppercase font-mono block">Date of Birth (DOB)</span>
+                      <p className="font-bold text-slate-800 dark:text-slate-200 font-mono">
+                        {selectedProfileUser.dob || '1986-05-14'}
+                        <span className="text-[10px] text-slate-400 font-normal font-sans ml-1">({selectedProfileUser.age || '38'} yrs)</span>
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-semibold text-slate-400 uppercase font-mono block">Preferred Language</span>
+                      <p className="font-bold text-slate-800 dark:text-slate-200">{selectedProfileUser.preferredLanguage || 'English (Ghana)'}</p>
                     </div>
                     <div>
                       <span className="text-[9px] font-semibold text-slate-400 uppercase font-mono block">Marital Status</span>
                       <p className="font-bold text-slate-800 dark:text-slate-200">{selectedProfileUser.maritalStatus || 'Married'}</p>
-                    </div>
-                    <div>
-                      <span className="text-[9px] font-semibold text-slate-400 uppercase font-mono block">Preferred Language</span>
-                      <p className="font-bold text-slate-800 dark:text-slate-200">{selectedProfileUser.preferredLanguage || 'English (U.S.)'}</p>
                     </div>
                     <div>
                       <span className="text-[9px] font-semibold text-slate-400 uppercase font-mono block">Employment SDoH</span>
@@ -3273,6 +4393,10 @@ export default function AdminLayout({
                       <p className="font-bold text-slate-800 dark:text-slate-200 truncate" title={selectedProfileUser.educationLevel || 'Graduate Degree'}>
                         {selectedProfileUser.educationLevel || 'Graduate Degree'}
                       </p>
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-semibold text-slate-400 uppercase font-mono block">Assigned 4-Digit ID</span>
+                      <p className="font-bold text-emerald-600 dark:text-emerald-400 font-mono">{formatUserId(selectedProfileUser.id)}</p>
                     </div>
                   </div>
 
@@ -3314,13 +4438,13 @@ export default function AdminLayout({
                             {/* blood pressure highlight */}
                             <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800/80 p-2.5 rounded-lg flex items-center justify-between">
                               <div className="flex items-center gap-2">
-                                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></span>
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
                                 <div>
                                   <p className="font-black text-[10px] text-slate-400 uppercase font-mono">Blood Pressure</p>
                                   <p className="text-[9px] text-slate-400 font-medium">{latestBP ? latestBP.timestamp : 'Manual average protocol'}</p>
                                 </div>
                               </div>
-                              <span className="text-sm font-black font-mono text-indigo-700 dark:text-indigo-400">
+                              <span className="text-sm font-black font-mono text-emerald-700 dark:text-emerald-400">
                                 {latestBP ? latestBP.value : '118/76'} <span className="text-[10px] font-normal">mmHg</span>
                               </span>
                             </div>
@@ -3353,7 +4477,7 @@ export default function AdminLayout({
                               </span>
                             </div>
 
-                            <p className="text-[10.5px] font-bold text-indigo-600 dark:text-indigo-400 pt-1 flex items-center gap-1">
+                            <p className="text-[10.5px] font-bold text-emerald-600 dark:text-emerald-400 pt-1 flex items-center gap-1">
                               <Activity className="w-3.5 h-3.5 inline" />
                               <span>Total logged diagnostic streams: {patientLogs.length} entries</span>
                             </p>
@@ -3460,46 +4584,442 @@ export default function AdminLayout({
 
             {/* Quick Action Footer Actions with fully functional button controls */}
             <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => {
-                  if (confirm(`Do you wish to log a custom manual diagnostic baseline for ${selectedProfileUser.name}?`)) {
-                    // Seed a dynamic BP log entry for this client instantly
-                    const customLogValue = prompt("Enter Blood Pressure average average (e.g. 124/81 mmHg):", "122/79");
-                    if (customLogValue) {
-                      const newLog = {
-                        id: `log-${Date.now()}`,
-                        patientId: selectedProfileUser.id,
-                        patientName: selectedProfileUser.name,
-                        metric: 'Blood Pressure' as const,
-                        value: customLogValue,
-                        status: 'Normal' as const,
-                        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' · Manual Override',
-                        notes: 'Manual administrative profile override entry'
-                      };
-                      // Log the entry!
-                      // Find if global state or app callback allows it:
-                      // Since we are inside AdminLayout, we can dispatch notification via onTriggerToast
-                      onTriggerToast(`Manual override baseline seeded: ${customLogValue} mmHg`, 'success');
-                      // Add to logs
-                    }
-                  }
-                }}
-                className="py-2 px-3.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 dark:text-indigo-300 font-extrabold rounded-xl text-xs transition cursor-pointer"
-              >
-                Log Manual Baseline reading
-              </button>
+              {selectedProfileUser.role === 'patient' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const patientToLog = selectedProfileUser;
+                    setSelectedProfileUser(null);
+                    setLogReadingsPatient(patientToLog);
+                    setAdminSys1(120);
+                    setAdminSys2(120);
+                    setAdminSys3(120);
+                    setAdminDia1(80);
+                    setAdminDia2(80);
+                    setAdminDia3(80);
+                    setAdminPulse1(72);
+                    setAdminPulse2(72);
+                    setAdminPulse3(72);
+                    setReadGlucose('');
+                    setReadMood(8);
+                    setReadStress(3);
+                    setReadPain(1);
+                    setReadSymptoms(['Normal / Stable']);
+                    setReadAdherence('Full Adherence');
+                    setReadNotes('');
+                  }}
+                  className="py-2 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5 shadow-md shadow-emerald-600/15"
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  <span>Log Patient Readings & Vitals</span>
+                </button>
+              )}
               
               <button
                 type="button"
                 onClick={() => setSelectedProfileUser(null)}
-                className="py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-heavy rounded-xl text-xs transition cursor-pointer shadow-lg shadow-indigo-600/15"
+                className="py-2 px-4 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-extrabold rounded-xl text-xs transition cursor-pointer"
               >
                 Close Profile
               </button>
             </div>
             
           </div>
+        </div>
+      )}
+
+      {/* Super Admin - Log Patient Telemetry Readings Modal */}
+      {logReadingsPatient && (
+        <div className="fixed inset-0 z-[10500] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs overflow-y-auto font-sans">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-5 my-8 text-slate-900 dark:text-slate-100 relative"
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 flex items-center justify-center font-extrabold text-base shrink-0">
+                  <Activity className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
+                    Log Telemetry Readings for {logReadingsPatient.name}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Patient ID: <span className="font-mono font-bold text-slate-600 dark:text-slate-300">{logReadingsPatient.id}</span> · {logReadingsPatient.email}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLogReadingsPatient(null)}
+                className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Form Body */}
+            <form onSubmit={handleSavePatientReadings} className="space-y-5">
+              
+              {/* Allocated Date & Quick Presets */}
+              <div className="space-y-3 bg-slate-50 dark:bg-slate-950/40 p-4 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest block font-mono">
+                      Allocated Reading Date (Date Taken) *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={adminLogDate}
+                      onChange={(e) => setAdminLogDate(e.target.value)}
+                      className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
+                    />
+                  </div>
+                  <div className="flex flex-col sm:items-end gap-1">
+                    <span className="text-[10px] font-bold text-slate-400 font-mono uppercase tracking-wider">Quick Presets:</span>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAdminSys1(118); setAdminDia1(78); setAdminPulse1(70);
+                          setAdminSys2(120); setAdminDia2(80); setAdminPulse2(72);
+                          setAdminSys3(116); setAdminDia3(76); setAdminPulse3(68);
+                          setReadGlucose('95');
+                          setReadMood(9); setReadStress(2); setReadPain(1);
+                          setReadSymptoms(['Normal / Stable']);
+                          setReadAdherence('Full Adherence');
+                          setReadNotes('Routine checkup. Vitals within optimal ranges.');
+                        }}
+                        className="px-2.5 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-[10px] font-bold hover:bg-slate-100 transition cursor-pointer"
+                      >
+                        Optimal Baseline
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAdminSys1(146); setAdminDia1(92); setAdminPulse1(86);
+                          setAdminSys2(150); setAdminDia2(96); setAdminPulse2(90);
+                          setAdminSys3(148); setAdminDia3(94); setAdminPulse3(88);
+                          setReadGlucose('138');
+                          setReadMood(4); setReadStress(8); setReadPain(6);
+                          setReadSymptoms(['Headache', 'Dizziness', 'Shortness of Breath']);
+                          setReadAdherence('Partial Adherence');
+                          setReadNotes('Patient reports elevated stress and occasional headache.');
+                        }}
+                        className="px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 rounded-lg text-[10px] font-bold hover:bg-amber-100 transition cursor-pointer"
+                      >
+                        Stage 2 Alert Preset
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Standard 3-Reading Procedure Inputs */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-extrabold text-slate-900 dark:text-white uppercase tracking-wider font-mono flex items-center gap-1.5">
+                    <span>Clinical 3-Reading Procedure (45s Interval Standard)</span>
+                  </h4>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400">
+                    Same Procedure as Patient Self-Log
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {/* Reading 1 */}
+                  <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-2">
+                    <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest font-mono block">
+                      Reading 1 (Initial)
+                    </span>
+                    <div className="space-y-1.5">
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase">Systolic (mmHg)</label>
+                        <input
+                          type="number"
+                          min="60" max="260" required
+                          value={adminSys1}
+                          onChange={(e) => setAdminSys1(Number(e.target.value))}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs font-bold font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase">Diastolic (mmHg)</label>
+                        <input
+                          type="number"
+                          min="40" max="160" required
+                          value={adminDia1}
+                          onChange={(e) => setAdminDia1(Number(e.target.value))}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs font-bold font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase">Pulse (BPM)</label>
+                        <input
+                          type="number"
+                          min="30" max="220" required
+                          value={adminPulse1}
+                          onChange={(e) => setAdminPulse1(Number(e.target.value))}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs font-bold font-mono"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Reading 2 */}
+                  <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-2">
+                    <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest font-mono block">
+                      Reading 2 (+45s Rest)
+                    </span>
+                    <div className="space-y-1.5">
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase">Systolic (mmHg)</label>
+                        <input
+                          type="number"
+                          min="60" max="260" required
+                          value={adminSys2}
+                          onChange={(e) => setAdminSys2(Number(e.target.value))}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs font-bold font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase">Diastolic (mmHg)</label>
+                        <input
+                          type="number"
+                          min="40" max="160" required
+                          value={adminDia2}
+                          onChange={(e) => setAdminDia2(Number(e.target.value))}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs font-bold font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase">Pulse (BPM)</label>
+                        <input
+                          type="number"
+                          min="30" max="220" required
+                          value={adminPulse2}
+                          onChange={(e) => setAdminPulse2(Number(e.target.value))}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs font-bold font-mono"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Reading 3 */}
+                  <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-2">
+                    <span className="text-[10px] font-extrabold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest font-mono block">
+                      Reading 3 (+90s Rest)
+                    </span>
+                    <div className="space-y-1.5">
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase">Systolic (mmHg)</label>
+                        <input
+                          type="number"
+                          min="60" max="260" required
+                          value={adminSys3}
+                          onChange={(e) => setAdminSys3(Number(e.target.value))}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs font-bold font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase">Diastolic (mmHg)</label>
+                        <input
+                          type="number"
+                          min="40" max="160" required
+                          value={adminDia3}
+                          onChange={(e) => setAdminDia3(Number(e.target.value))}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs font-bold font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-bold text-slate-500 uppercase">Pulse (BPM)</label>
+                        <input
+                          type="number"
+                          min="30" max="220" required
+                          value={adminPulse3}
+                          onChange={(e) => setAdminPulse3(Number(e.target.value))}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs font-bold font-mono"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Calculated Averages Live Banner */}
+                <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/70 p-3 rounded-xl flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                      Calculated 3-Reading Averages:
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 text-xs font-black font-mono">
+                    <span className="text-emerald-700 dark:text-emerald-400">
+                      SYS: {Math.round(((Number(adminSys1) || 0) + (Number(adminSys2) || 0) + (Number(adminSys3) || 0)) / 3)} mmHg
+                    </span>
+                    <span className="text-sky-700 dark:text-sky-400">
+                      DIA: {Math.round(((Number(adminDia1) || 0) + (Number(adminDia2) || 0) + (Number(adminDia3) || 0)) / 3)} mmHg
+                    </span>
+                    <span className="text-rose-600 dark:text-rose-400">
+                      BPM: {Math.round(((Number(adminPulse1) || 0) + (Number(adminPulse2) || 0) + (Number(adminPulse3) || 0)) / 3)} bpm
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Glucose & Medication Adherence */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest block font-mono">
+                    Blood Glucose (mg/dL) - Optional
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 98 or 110"
+                    value={readGlucose}
+                    onChange={(e) => setReadGlucose(e.target.value)}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest block font-mono">
+                    Medication Adherence Status
+                  </label>
+                  <select
+                    value={readAdherence}
+                    onChange={(e) => setReadAdherence(e.target.value)}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-900 dark:text-white h-[34px] cursor-pointer"
+                  >
+                    <option value="Full Adherence">Full Adherence (All Prescribed)</option>
+                    <option value="Partial Adherence">Partial Adherence (Some Missed)</option>
+                    <option value="Non-Compliant">Non-Compliant / Missed Dose</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Wellbeing Index Sliders */}
+              <div className="space-y-2 bg-slate-50 dark:bg-slate-950/40 p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800">
+                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest block font-mono">
+                  Subjective Health Indices (1 - 10)
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs font-semibold">
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <span>Mood Index:</span>
+                      <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">{readMood}/10</span>
+                    </div>
+                    <input 
+                      type="range" min="1" max="10" value={readMood} onChange={(e) => setReadMood(Number(e.target.value))}
+                      className="w-full accent-emerald-600 cursor-pointer"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <span>Stress Level:</span>
+                      <span className="font-mono font-bold text-amber-600 dark:text-amber-400">{readStress}/10</span>
+                    </div>
+                    <input 
+                      type="range" min="1" max="10" value={readStress} onChange={(e) => setReadStress(Number(e.target.value))}
+                      className="w-full accent-amber-600 cursor-pointer"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <span>Pain Severity:</span>
+                      <span className="font-mono font-bold text-rose-600 dark:text-rose-400">{readPain}/10</span>
+                    </div>
+                    <input 
+                      type="range" min="1" max="10" value={readPain} onChange={(e) => setReadPain(Number(e.target.value))}
+                      className="w-full accent-rose-600 cursor-pointer"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Reported Symptoms Selectable Pills */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest block font-mono">
+                  Active Clinical Symptoms
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    'Normal / Stable', 'Headache', 'Dizziness', 'Shortness of Breath', 
+                    'Fatigue', 'Chest Tightness', 'Leg Swelling', 'Nausea', 'Palpitations', 'Vision Changes'
+                  ].map(symptom => {
+                    const isSelected = readSymptoms.includes(symptom);
+                    return (
+                      <button
+                        key={symptom}
+                        type="button"
+                        onClick={() => {
+                          if (symptom === 'Normal / Stable') {
+                            setReadSymptoms(['Normal / Stable']);
+                          } else {
+                            let updated = readSymptoms.filter(s => s !== 'Normal / Stable');
+                            if (isSelected) {
+                              updated = updated.filter(s => s !== symptom);
+                              if (updated.length === 0) updated = ['Normal / Stable'];
+                            } else {
+                              updated.push(symptom);
+                            }
+                            setReadSymptoms(updated);
+                          }
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer border ${
+                          isSelected
+                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                            : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        {isSelected && <Check className="w-3 h-3 inline mr-1" />}
+                        {symptom}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Observations & Admin Notes */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest block font-mono">
+                  Administrative / Clinical Notes
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="Record additional observation notes, clinical context, or patient feedback..."
+                  value={readNotes}
+                  onChange={(e) => setReadNotes(e.target.value)}
+                  className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-2.5 text-xs text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Submit / Action Footer */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setLogReadingsPatient(null)}
+                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/20 cursor-pointer"
+                >
+                  <Activity className="w-4 h-4" />
+                  <span>Save & Dispatch Telemetry Entry</span>
+                </button>
+              </div>
+
+            </form>
+          </motion.div>
         </div>
       )}
     </div>

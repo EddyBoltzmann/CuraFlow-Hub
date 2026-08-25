@@ -175,8 +175,57 @@ export const defaultArticles: CMSArticle[] = [
 // Clear out simulated users - App will auto-bootstrap Eddy Boltzmann as admin
 export const defaultUsers: AppUser[] = [];
 
-// Clear out simulated library FAQs
-export const defaultFAQs: FAQ[] = [];
+// Clinical & Platform FAQs for Help Center
+export const defaultFAQs: FAQ[] = [
+  {
+    id: 'faq-1',
+    question: 'How does the Ahomka Ho 3-reading blood pressure process work?',
+    answer: 'The Ahomka Ho protocol requires taking 3 consecutive blood pressure readings spaced 45 seconds apart while resting. The platform automatically calculates your mathematical average systolic, diastolic, and pulse rate for enhanced clinical accuracy.',
+    category: 'Vitals & Blood Pressure'
+  },
+  {
+    id: 'faq-2',
+    question: 'What should I do if my blood pressure reading is in the High Risk stage (>=140/90 mmHg)?',
+    answer: 'If your averaged reading indicates High Risk, rest quietly for 5-10 minutes in a calm environment and re-measure. If readings remain elevated or if you experience chest tightness, severe headache, or shortness of breath, contact your physician immediately or request urgent care.',
+    category: 'Vitals & Blood Pressure'
+  },
+  {
+    id: 'faq-3',
+    question: 'How do I schedule a virtual appointment with a specialist?',
+    answer: 'Navigate to the Ahomka Ho or Healthcare Services section, select your preferred provider from our verified specialist registry, choose a suitable video, audio, or chat slot, and click "Confirm Booking".',
+    category: 'Appointments & Care'
+  },
+  {
+    id: 'faq-4',
+    question: 'Is my health telemetry and messaging data secure?',
+    answer: 'Yes. All health telemetry, lab documents, and messages are encrypted in transit and at rest in compliance with clinical privacy standards and HIPAA/GDPR data governance guidelines.',
+    category: 'Account & Security'
+  },
+  {
+    id: 'faq-5',
+    question: 'How do I track my daily blood pressure averages?',
+    answer: 'Use the Ahomka Ho (Health Vitals) protocol tab to enter your 3 consecutive blood pressure readings spaced 1 minute apart. The system automatically computes your clinical averages and tracks hypertension trends.',
+    category: 'Vitals & Blood Pressure'
+  },
+  {
+    id: 'faq-6',
+    question: 'Can I export my blood pressure history to share with my doctor?',
+    answer: 'Yes! On the Ahomka Ho Vitals screen, click the "Export CSV" button to download a formatted CSV spreadsheet containing all your historical 3-reading averages, symptoms, and clinical notes.',
+    category: 'Vitals & Blood Pressure'
+  },
+  {
+    id: 'faq-7',
+    question: 'What symptoms should I log during my daily check-in?',
+    answer: 'Log any symptoms such as headaches, dizziness, fatigue, chest discomfort, or swelling. Logging symptoms alongside your vital readings gives your healthcare team vital context for medication adjustments.',
+    category: 'General Wellness'
+  },
+  {
+    id: 'faq-8',
+    question: 'What should I do if I forget to take my daily medication?',
+    answer: 'Record your medication adherence status in your daily log ("Missed Dose" or "Partial Adherence"). Follow your physician’s instructions regarding missed doses—never double up on blood pressure medications unless explicitly instructed.',
+    category: 'Medication'
+  }
+];
 
 // Clear out simulated announcements
 export const defaultAnnouncements: Announcement[] = [];
@@ -209,12 +258,7 @@ export interface WeeklyComplaint {
   avgResponseHours: number;
 }
 
-export const defaultWeeklyComplaints: WeeklyComplaint[] = [
-  { week: 'W1 (May 10-16)', escalated: 3, resolved: 2, avgResponseHours: 4.2 },
-  { week: 'W2 (May 17-23)', escalated: 7, resolved: 4, avgResponseHours: 3.5 },
-  { week: 'W3 (May 24-30)', escalated: 12, resolved: 9, avgResponseHours: 2.8 },
-  { week: 'W4 (May 31-Jun 08)', escalated: 8, resolved: 7, avgResponseHours: 1.9 }
-];
+export const defaultWeeklyComplaints: WeeklyComplaint[] = [];
 
 // Default engagement telemetry (30 days rolling)
 export interface EngagementDataPoint {
@@ -223,10 +267,5 @@ export interface EngagementDataPoint {
   platformActions: number;
 }
 
-export const defaultEngagementData: EngagementDataPoint[] = [
-  { date: '06-01', activeUsers: 12, platformActions: 45 },
-  { date: '06-03', activeUsers: 18, platformActions: 72 },
-  { date: '06-05', activeUsers: 25, platformActions: 110 },
-  { date: '06-07', activeUsers: 30, platformActions: 145 },
-  { date: '06-09', activeUsers: 35, platformActions: 180 }
-];
+export const defaultEngagementData: EngagementDataPoint[] = [];
+
