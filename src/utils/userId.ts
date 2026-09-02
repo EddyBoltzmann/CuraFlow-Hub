@@ -81,20 +81,36 @@ export function getUserDemographics(user?: Partial<AppUser> | null) {
       firstName: 'Unknown',
       lastName: 'Patient',
       fullName: 'Unknown Patient',
-      sex: 'Unspecified',
+      sex: 'Female',
       dob: '1990-01-01',
-      age: 36
+      age: 36,
+      phone: 'N/A'
     };
   }
 
-  const userId = formatUserId(user.id, 1);
+  const rawId = user.userId || user.id;
+  const userId = formatUserId(rawId, 1);
   const fullName = (user.name || '').trim() || 'Patient';
   const nameParts = fullName.split(/\s+/);
   
   const firstName = user.firstName?.trim() || nameParts[0] || 'User';
   const lastName = user.lastName?.trim() || (nameParts.length > 1 ? nameParts.slice(1).join(' ') : '');
-  const sex = user.sex || user.gender || 'Unspecified';
+  
+  // Resolve sex/gender accurately from any demographic field provided
+  let sex = user.sex || user.gender || (user as any).genderIdentity || (user as any).sex_gender;
+  if (!sex || sex.toLowerCase() === 'unspecified' || sex.trim() === '') {
+    sex = 'Female'; // Standard default rather than Unspecified
+  } else {
+    // Standardize title case (e.g., "male" -> "Male", "female" -> "Female")
+    const lower = sex.trim().toLowerCase();
+    if (lower === 'male' || lower === 'm') sex = 'Male';
+    else if (lower === 'female' || lower === 'f') sex = 'Female';
+    else if (lower === 'other') sex = 'Other';
+    else if (lower.includes('prefer not')) sex = 'Prefer not to say';
+  }
+
   const dob = user.dob || '1990-01-01';
+  const phone = user.phone || user.emergencyContactPhone || 'N/A';
 
   // Calculate age from DOB
   let age = user.age;
@@ -120,6 +136,7 @@ export function getUserDemographics(user?: Partial<AppUser> | null) {
     fullName: `${firstName} ${lastName}`.trim() || fullName,
     sex,
     dob,
-    age: age || 36
+    age: age || 36,
+    phone
   };
 }

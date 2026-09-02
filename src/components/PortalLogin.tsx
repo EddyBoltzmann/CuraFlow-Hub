@@ -8,7 +8,7 @@ import { AppUser } from '../types';
 import { 
   Lock, UserPlus, Heart, LogIn, ShieldAlert, Sparkles, 
   Eye, EyeOff, ShieldCheck, Mail, Check, Activity, ShieldCheck as VerifiedBadge,
-  User, CheckCircle2, ChevronRight, Clock, Award, Calendar, Hash
+  User, CheckCircle2, ChevronRight, Clock, Award, Calendar, Hash, Phone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { generateUserId } from '../utils/userId';
@@ -27,6 +27,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
   const [name, setName] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [phone, setPhone] = useState('');
   const [sex, setSex] = useState<'Male' | 'Female' | 'Other' | 'Prefer not to say'>('Female');
   const [dob, setDob] = useState('');
   const [role, setRole] = useState<'patient' | 'provider' | 'admin'>('patient');
@@ -221,6 +222,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
       sex: sex,
       gender: sex,
       dob: dob,
+      phone: phone.trim() || undefined,
       age: calculatedAge > 0 ? calculatedAge : 35,
       email: email.trim().toLowerCase(),
       role: role,
@@ -229,7 +231,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
       avatar: undefined,
       password: password.trim(),
       emergencyContactName: '',
-      emergencyContactPhone: '',
+      emergencyContactPhone: phone.trim() || '',
       emergencyContactRelation: '',
       insuranceProvider: '',
       insuranceMemberId: '',
@@ -253,6 +255,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
     setPassword('');
     setFirstName('');
     setLastName('');
+    setPhone('');
     setDob('');
   };
 
@@ -841,6 +844,26 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
                         className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 focus:outline-none py-2.5 pl-10 pr-3 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm cursor-pointer"
                       />
                     </div>
+                  </div>
+                </div>
+
+                {/* Telephone / Phone Number */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">
+                    Telephone / Phone Number
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+                      <Phone className="w-4 h-4" />
+                    </span>
+                    <input 
+                      id="reg-phone-input"
+                      type="tel" 
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="e.g. +1 (555) 234-5678"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:focus:border-emerald-400 focus:outline-none py-2.5 pl-10 pr-3 rounded-xl text-xs font-semibold text-slate-900 dark:text-white transition-all shadow-sm"
+                    />
                   </div>
                 </div>
 

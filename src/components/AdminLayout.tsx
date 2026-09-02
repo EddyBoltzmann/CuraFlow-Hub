@@ -14,12 +14,21 @@ import { WeeklyComplaint, EngagementDataPoint } from '../data';
 import { 
   Activity, Users, FileText, HelpCircle, Bell, Settings, Plus, Trash2, 
   Check, ShieldAlert, Sparkles, AlertTriangle, Play, Info, EyeOff, Layout, Globe, Server, Download, RefreshCw, TrendingUp,
-  MapPin, Shield, GraduationCap, Briefcase, Stethoscope, Database, UserCheck, X, HeartPulse, Filter, User
+  MapPin, Shield, GraduationCap, Briefcase, Stethoscope, Database, UserCheck, X, HeartPulse, Filter, User,
+  Calendar, CalendarDays
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, BarChart, Bar, ReferenceLine, ReferenceArea
 } from 'recharts';
 import { generateUserId, formatUserId, getUserDemographics } from '../utils/userId';
+import { 
+  ExportMonthPreset, 
+  getMonthPresetRange, 
+  formatMonthRangeLabel, 
+  getMonthRangeSlug, 
+  formatMonthName, 
+  isRecordInMonthRange 
+} from '../utils/dateRange';
 
 interface AdminLayoutProps {
   session: AppUser;
@@ -260,6 +269,7 @@ export default function AdminLayout({
   // Socio-demographic registration input states
   const [regFirstName, setRegFirstName] = useState<string>('Ama');
   const [regLastName, setRegLastName] = useState<string>('Serwaa');
+  const [regPhone, setRegPhone] = useState<string>('');
   const [regSex, setRegSex] = useState<string>('Female');
   const [regDob, setRegDob] = useState<string>('1986-05-14');
   const [regCustomUserId, setRegCustomUserId] = useState<string>('');
@@ -284,6 +294,11 @@ export default function AdminLayout({
   const [exportDateRange, setExportDateRange] = useState<'all' | '7days' | '30days'>('all');
   const [exportCompleted, setExportCompleted] = useState(false);
   const [isRefreshingExporter, setIsRefreshingExporter] = useState(false);
+
+  // Patient Clinical Data Export by Month Range States
+  const [exportMonthPreset, setExportMonthPreset] = useState<ExportMonthPreset>('all');
+  const [exportStartMonth, setExportStartMonth] = useState<string>('');
+  const [exportEndMonth, setExportEndMonth] = useState<string>('');
   const [systolicThreshold, setSystolicThreshold] = useState<number>(140);
   const [diastolicThreshold, setDiastolicThreshold] = useState<number>(90);
 
@@ -478,6 +493,8 @@ export default function AdminLayout({
       sex: regSex || 'Female',
       gender: regSex || regGender || 'Female',
       dob: regDob || '1986-05-14',
+      phone: regPhone.trim() || undefined,
+      emergencyContactPhone: regPhone.trim() || '',
       age: calculatedAge,
       email: newUserEmail.trim().toLowerCase(),
       role: roleToAssign,
@@ -494,6 +511,7 @@ export default function AdminLayout({
       setNewUserName('');
       setRegFirstName('');
       setRegLastName('');
+      setRegPhone('');
       setNewUserEmail('');
       setNewUserPassword('');
       setRegCustomUserId('');
@@ -511,28 +529,188 @@ export default function AdminLayout({
       let finalContent = "";
       let filename = `CFL_Secured_Export_${exportDataType}_${Date.now()}`;
       
+      const escapeCsvVal = (val: any) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+
+      // Helper to retrieve all vitals records for a patient from Ahomka entries or BP logs
+      const getPatientVitalsRecords = (pat: AppUser) => {
+        const demo = getUserDemographics(pat);
+        const matchedAhomka = ahomkaEntries.filter(entry => 
+          entry.patientId === pat.id || 
+          entry.patientId === pat.userId || 
+          entry.userId === pat.id || 
+          entry.userId === pat.userId || 
+          formatUserId(entry.patientId) === formatUserId(pat.id) ||
+          formatUserId(entry.userId) === formatUserId(pat.id) ||
+          (entry.firstName?.toLowerCase() === demo.firstName.toLowerCase() && entry.lastName?.toLowerCase() === demo.lastName.toLowerCase()) ||
+          (!entry.patientId && pat.id === 'usr-1')
+        );
+
+        if (matchedAhomka.length > 0) {
+          return matchedAhomka;
+        }
+
+        const bpLogs = logs.filter(l => 
+          l.metric === 'Blood Pressure' && (
+            l.patientId === pat.id || 
+            l.patientId === pat.userId || 
+            l.userId === pat.id || 
+            formatUserId(l.patientId) === formatUserId(pat.id) ||
+            (l.patientName && l.patientName.toLowerCase() === pat.name.toLowerCase())
+          )
+        );
+
+        if (bpLogs.length > 0) {
+          return bpLogs.map(l => {
+            const parts = (l.value || '').split('/');
+            const sys = parseInt(parts[0]) || undefined;
+            const dia = parseInt(parts[1]) || undefined;
+            const pulseMatch = l.notes?.match(/Pulse:\s*(\d+)/i);
+            const pulse = pulseMatch ? parseInt(pulseMatch[1]) : undefined;
+            const medMatch = l.notes?.match(/Medication:\s*([^.]+)/i);
+            const med = medMatch ? medMatch[1].trim() : undefined;
+            return {
+              id: l.id,
+              timestamp: l.timestamp,
+              dateOfReading: l.dateOfReading || l.timestamp,
+              systolic: sys,
+              diastolic: dia,
+              pulse,
+              medicationAdherence: med,
+              feeling: 'Normal Daily Comfort',
+              symptoms: [],
+              mood: undefined,
+              stress: undefined,
+              painLevel: undefined,
+              notes: l.notes || ''
+            } as Partial<AhomkaEntry>;
+          });
+        }
+
+        return [];
+      };
+
+      const formatSymptoms = (symptoms?: string[]) => {
+        if (!symptoms || symptoms.length === 0) return "No Symptoms";
+        const valid = symptoms.filter(s => s && s.trim() && s !== "No Symptoms");
+        return valid.length > 0 ? valid.join(", ") : "No Symptoms";
+      };
+
       if (exportFormat === 'json') {
         let payload: any = {};
-        if (exportDataType === 'all' || exportDataType === 'patients') payload.patients = users;
-        if (exportDataType === 'all' || exportDataType === 'logs') payload.clinical_logs = logs;
+        if (exportDataType === 'all' || exportDataType === 'patients' || exportDataType === 'logs') {
+          payload.clinical_records = users.filter(u => u.role === 'patient').flatMap(patient => {
+            const demo = getUserDemographics(patient);
+            const phone = patient.phone || patient.emergencyContactPhone || 'N/A';
+            const patientEntries = getPatientVitalsRecords(patient);
+            if (patientEntries.length === 0) {
+              return [{
+                userId: demo.userId,
+                firstName: demo.firstName,
+                lastName: demo.lastName,
+                sex: demo.sex,
+                dob: demo.dob,
+                telephone: phone,
+                averageSystolic: 'N/A',
+                averageDiastolic: 'N/A',
+                averageBpm: 'N/A',
+                dateOfReadingTaken: 'No readings logged',
+                registeredSymptoms: 'N/A',
+                moodScore: 'N/A',
+                perceivedStress: 'N/A',
+                comfortStanding: 'N/A',
+                medicationAdherence: 'N/A'
+              }];
+            }
+            return patientEntries.map(e => ({
+              userId: demo.userId,
+              firstName: demo.firstName,
+              lastName: demo.lastName,
+              sex: demo.sex,
+              dob: demo.dob,
+              telephone: phone,
+              averageSystolic: e.systolic ?? 'N/A',
+              averageDiastolic: e.diastolic ?? 'N/A',
+              averageBpm: e.pulse ?? 'N/A',
+              dateOfReadingTaken: e.dateOfReading || e.timestamp || 'N/A',
+              registeredSymptoms: formatSymptoms(e.symptoms),
+              moodScore: e.mood ?? 'N/A',
+              perceivedStress: e.stress ?? 'N/A',
+              comfortStanding: e.feeling || (e.comfortScore !== undefined ? `${e.comfortScore}% Relief` : (e.reliefScore !== undefined ? `${e.reliefScore}% Relief` : 'N/A')),
+              medicationAdherence: e.medicationAdherence || 'N/A'
+            }));
+          });
+        }
         if (exportDataType === 'all' || exportDataType === 'audit') payload.audit_compliance = auditLogs;
         finalContent = JSON.stringify(payload, null, 2);
         filename += ".json";
       } else {
-        // Generate CSV file formatted under HIPAA rules
-        if (exportDataType === 'patients' || exportDataType === 'all') {
-          finalContent += "PATIENTS REGISTRY DATA\n";
-          finalContent += "ID,Name,Email,Role,Status,Verified\n";
-          users.forEach(u => {
-            finalContent += `"${u.id}","${u.name}","${u.email}","${u.role}","${u.status}","${u.verified}"\n`;
-          });
-          finalContent += "\n";
-        }
-        if (exportDataType === 'logs' || exportDataType === 'all') {
-          finalContent += "CLINICAL LOGS BIOMETRICS SURVEY DATA\n";
-          finalContent += "ID,PatientId,Timestamp,Metric,Value,Trend,VerifiedBy,HighRisk\n";
-          logs.forEach(l => {
-            finalContent += `"${l.id}","${l.patientId || ''}","${l.timestamp}","${l.metric}","${l.value}","${l.trend}","${l.verifiedBy}","${l.isHighRisk || false}"\n`;
+        // Generate CSV file formatted strictly with required headers
+        if (exportDataType === 'patients' || exportDataType === 'logs' || exportDataType === 'all') {
+          finalContent += "CLINICAL PATIENTS & VITALS TELEMETRY DATA\n";
+          const headers = [
+            "User ID",
+            "First Name",
+            "Last Name",
+            "Sex",
+            "DOB",
+            "Telephone",
+            "Average Systolic",
+            "Average Diastolic",
+            "Average BPM",
+            "Date of Reading Taken",
+            "Registered Symptoms",
+            "Mood Score",
+            "Perceived Stress",
+            "Comfort Standing",
+            "Medication Adherence"
+          ];
+          finalContent += headers.map(escapeCsvVal).join(",") + "\n";
+
+          const patientList = users.filter(u => u.role === 'patient');
+          patientList.forEach(pat => {
+            const demo = getUserDemographics(pat);
+            const phone = pat.phone || pat.emergencyContactPhone || 'N/A';
+            const patientEntries = getPatientVitalsRecords(pat);
+
+            if (patientEntries.length === 0) {
+              finalContent += [
+                demo.userId,
+                demo.firstName,
+                demo.lastName,
+                demo.sex,
+                demo.dob,
+                phone,
+                "N/A",
+                "N/A",
+                "N/A",
+                "No readings logged",
+                "N/A",
+                "N/A",
+                "N/A",
+                "N/A",
+                "N/A"
+              ].map(escapeCsvVal).join(",") + "\n";
+            } else {
+              patientEntries.forEach(entry => {
+                finalContent += [
+                  demo.userId,
+                  demo.firstName,
+                  demo.lastName,
+                  demo.sex,
+                  demo.dob,
+                  phone,
+                  entry.systolic !== undefined ? String(entry.systolic) : "N/A",
+                  entry.diastolic !== undefined ? String(entry.diastolic) : "N/A",
+                  entry.pulse !== undefined ? String(entry.pulse) : "N/A",
+                  entry.dateOfReading || entry.timestamp || "N/A",
+                  formatSymptoms(entry.symptoms),
+                  entry.mood !== undefined ? String(entry.mood) : "N/A",
+                  entry.stress !== undefined ? String(entry.stress) : "N/A",
+                  entry.feeling || (entry.comfortScore !== undefined ? `${entry.comfortScore}% Relief` : (entry.reliefScore !== undefined ? `${entry.reliefScore}% Relief` : "N/A")),
+                  entry.medicationAdherence || "N/A"
+                ].map(escapeCsvVal).join(",") + "\n";
+              });
+            }
           });
           finalContent += "\n";
         }
@@ -560,7 +738,132 @@ export default function AdminLayout({
 
   // Patient selecting for downloading clinical summary logs
   const patients = users.filter(u => u.role === 'patient');
-  const [selectedDownloadPatientId, setSelectedDownloadPatientId] = useState<string>(patients[0]?.id || '');
+  const [selectedDownloadPatientId, setSelectedDownloadPatientId] = useState<string>(patients[0]?.id || 'all');
+
+  // Helper to retrieve all vitals records for a patient from Ahomka entries or BP logs
+  const getPatientVitalsRecords = (pat: AppUser) => {
+    const pDemo = getUserDemographics(pat);
+    const matchedAhomka = ahomkaEntries.filter(entry => 
+      entry.patientId === pat.id || 
+      entry.patientId === pat.userId || 
+      entry.userId === pat.id || 
+      entry.userId === pat.userId || 
+      formatUserId(entry.patientId) === formatUserId(pat.id) ||
+      formatUserId(entry.userId) === formatUserId(pat.id) ||
+      (entry.firstName?.toLowerCase() === pDemo.firstName.toLowerCase() && entry.lastName?.toLowerCase() === pDemo.lastName.toLowerCase()) ||
+      (!entry.patientId && pat.id === 'usr-1')
+    );
+
+    if (matchedAhomka.length > 0) {
+      return matchedAhomka;
+    }
+
+    const bpLogs = logs.filter(l => 
+      l.metric === 'Blood Pressure' && (
+        l.patientId === pat.id || 
+        l.patientId === pat.userId || 
+        l.userId === pat.id || 
+        formatUserId(l.patientId) === formatUserId(pat.id) ||
+        (l.patientName && l.patientName.toLowerCase() === pat.name.toLowerCase())
+      )
+    );
+
+    if (bpLogs.length > 0) {
+      return bpLogs.map(l => {
+        const parts = (l.value || '').split('/');
+        const sys = parseInt(parts[0]) || undefined;
+        const dia = parseInt(parts[1]) || undefined;
+        const pulseMatch = l.notes?.match(/Pulse:\s*(\d+)/i);
+        const pulse = pulseMatch ? parseInt(pulseMatch[1]) : undefined;
+        const medMatch = l.notes?.match(/Medication:\s*([^.]+)/i);
+        const med = medMatch ? medMatch[1].trim() : undefined;
+        return {
+          id: l.id,
+          timestamp: l.timestamp,
+          dateOfReading: l.dateOfReading || l.timestamp,
+          systolic: sys,
+          diastolic: dia,
+          pulse,
+          medicationAdherence: med,
+          feeling: 'Normal Daily Comfort',
+          symptoms: [],
+          mood: undefined,
+          stress: undefined,
+          painLevel: undefined,
+          notes: l.notes || ''
+        } as Partial<AhomkaEntry>;
+      });
+    }
+
+    return [];
+  };
+
+  const formatSymptoms = (symptoms?: string[]) => {
+    if (!symptoms || symptoms.length === 0) return "No Symptoms";
+    const valid = symptoms.filter(s => s && s.trim() && s !== "No Symptoms");
+    return valid.length > 0 ? valid.join(", ") : "No Symptoms";
+  };
+
+  const handleMonthPresetChange = (preset: ExportMonthPreset) => {
+    setExportMonthPreset(preset);
+    const { startMonth, endMonth } = getMonthPresetRange(preset);
+    setExportStartMonth(startMonth);
+    setExportEndMonth(endMonth);
+  };
+
+  const handleStartMonthChange = (val: string) => {
+    setExportStartMonth(val);
+    setExportMonthPreset('custom');
+    if (exportEndMonth && val && val > exportEndMonth) {
+      setExportEndMonth(val);
+    }
+  };
+
+  const handleEndMonthChange = (val: string) => {
+    setExportEndMonth(val);
+    setExportMonthPreset('custom');
+    if (exportStartMonth && val && val < exportStartMonth) {
+      setExportStartMonth(val);
+    }
+  };
+
+  const handleResetMonthFilter = () => {
+    setExportMonthPreset('all');
+    setExportStartMonth('');
+    setExportEndMonth('');
+  };
+
+  // Real-time computation of matching record counts for export preview
+  const exportPreviewStats = useMemo(() => {
+    const targetPatient = users.find(u => u.id === selectedDownloadPatientId);
+    let selectedPatientTotal = 0;
+    let selectedPatientFiltered = 0;
+
+    if (targetPatient && targetPatient.role === 'patient') {
+      const records = getPatientVitalsRecords(targetPatient);
+      selectedPatientTotal = records.length;
+      selectedPatientFiltered = records.filter(r => 
+        isRecordInMonthRange(r.dateOfReading || r.timestamp, r.id, exportStartMonth, exportEndMonth)
+      ).length;
+    }
+
+    let cohortTotal = 0;
+    let cohortFiltered = 0;
+    patients.forEach(p => {
+      const records = getPatientVitalsRecords(p);
+      cohortTotal += records.length;
+      cohortFiltered += records.filter(r => 
+        isRecordInMonthRange(r.dateOfReading || r.timestamp, r.id, exportStartMonth, exportEndMonth)
+      ).length;
+    });
+
+    return {
+      selectedPatientTotal,
+      selectedPatientFiltered,
+      cohortTotal,
+      cohortFiltered
+    };
+  }, [users, patients, selectedDownloadPatientId, ahomkaEntries, logs, exportStartMonth, exportEndMonth]);
 
   // Sliced user engagement and activity metrics computed dynamically from database
   const effectiveEngagementData = useMemo(() => {
@@ -823,6 +1126,11 @@ export default function AdminLayout({
   }, [filteredBloodPressureData]);
 
   const handleDownloadHealthSummary = () => {
+    if (selectedDownloadPatientId === 'all') {
+      onTriggerToast('Please select a specific patient for an individual clinician PDF summary, or use CSV export for cohort data.', 'info');
+      return;
+    }
+
     const selectedPat = users.find(u => u.id === selectedDownloadPatientId);
     if (!selectedPat) {
       onTriggerToast('Please select an active patient first.', 'error');
@@ -834,6 +1142,9 @@ export default function AdminLayout({
     // Theme Colors
     const primaryColorHex = '#4F46E5'; 
     const textColorHex = '#1E293B';    
+
+    const rangeLabel = formatMonthRangeLabel(exportStartMonth, exportEndMonth);
+    const rangeSlug = getMonthRangeSlug(exportStartMonth, exportEndMonth);
 
     // Title Banner Background Rect (Indigo banner styling)
     doc.setFillColor(79, 70, 229);
@@ -848,6 +1159,7 @@ export default function AdminLayout({
     doc.setFontSize(9);
     doc.text("SECURE AUTOMATED TELEMETRY & CAREGIVER CONSULTATION SUMMARY", 14, 26);
     doc.text(`DATE GENERATED: ${new Date().toISOString().replace('T', ' ').slice(0, 19)} (UTC)`, 14, 32);
+    doc.text(`REPORTING PERIOD: ${rangeLabel.toUpperCase()}`, 14, 38);
 
     let y = 56;
 
@@ -942,11 +1254,16 @@ export default function AdminLayout({
 
     doc.setFont("helvetica", "normal");
     
-    if (logs.length === 0) {
-      doc.text("Null telemetry logs submitted.", 16, y + 6);
+    const patientLogs = logs.filter(l => 
+      (l.patientId === selectedPat.id || l.patientId === selectedPat.userId || l.userId === selectedPat.id || (l.patientName && l.patientName.toLowerCase() === selectedPat.name.toLowerCase())) &&
+      isRecordInMonthRange(l.dateOfReading || l.timestamp, l.id, exportStartMonth, exportEndMonth)
+    );
+
+    if (patientLogs.length === 0) {
+      doc.text(`Null telemetry logs in selected period (${rangeLabel}).`, 16, y + 6);
       y += 12;
     } else {
-      logs.forEach((log) => {
+      patientLogs.forEach((log) => {
         if (y > 270) {
           doc.addPage();
           y = 20;
@@ -1002,11 +1319,16 @@ export default function AdminLayout({
 
     doc.setFont("helvetica", "normal");
 
-    if (bookings.length === 0) {
-      doc.text("No encounters active on client timeline.", 16, y + 6);
+    const patientBookings = bookings.filter(b => 
+      (b.patientId === selectedPat.id || b.patientId === selectedPat.userId || (b.patientName && b.patientName.toLowerCase() === selectedPat.name.toLowerCase())) &&
+      isRecordInMonthRange(b.dateTime, b.id, exportStartMonth, exportEndMonth)
+    );
+
+    if (patientBookings.length === 0) {
+      doc.text(`No encounters active on client timeline in selected period (${rangeLabel}).`, 16, y + 6);
       y += 12;
     } else {
-      bookings.forEach((booking) => {
+      patientBookings.forEach((booking) => {
         if (y > 270) {
           doc.addPage();
           y = 20;
@@ -1052,66 +1374,117 @@ export default function AdminLayout({
     doc.text("This data export document contains highly confidential Patient Protected Health Information (PHI) under federal guidance.", 18, y + 10);
     doc.text("Authorized admin downloads are permanently logged with audit trail reference. Unauthorized reproduction is strictly forbidden.", 18, y + 14);
 
-    doc.save(`clinical_outcome_summary_${selectedPat.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}.pdf`);
-    onTriggerToast(`Health Summary PDF generated successfully for patient ${selectedPat.name}!`, 'success');
+    doc.save(`clinical_outcome_summary_${selectedPat.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_${rangeSlug}.pdf`);
+    onTriggerToast(`Health Summary PDF generated for ${selectedPat.name} [${rangeLabel}]!`, 'success');
   };
 
   const handleExportToCSV = () => {
+    if (selectedDownloadPatientId === 'all') {
+      handleExportAllPatientsToCSV();
+      return;
+    }
+
     const selectedPat = users.find(u => u.id === selectedDownloadPatientId);
     if (!selectedPat) {
       onTriggerToast('Please select an active patient first.', 'error');
       return;
     }
 
-    // Filter Ahomka entries for this specific patient
-    const patientEntries = ahomkaEntries.filter(entry => 
-      entry.patientId === selectedPat.id || (!entry.patientId && selectedPat.id === 'usr-1')
+    const demo = getUserDemographics(selectedPat);
+    const phone = selectedPat.phone || selectedPat.emergencyContactPhone || 'N/A';
+
+    // Retrieve vitals records and apply month range filter
+    const allPatientEntries = getPatientVitalsRecords(selectedPat);
+    const patientEntries = allPatientEntries.filter(entry => 
+      isRecordInMonthRange(entry.dateOfReading || entry.timestamp, entry.id, exportStartMonth, exportEndMonth)
     );
 
-    // Calculate Average Systolic, Diastolic & Pulse
-    const bpEntries = patientEntries.filter(e => e.systolic !== undefined && e.diastolic !== undefined);
-    const pulseEntries = patientEntries.filter(e => e.pulse !== undefined);
+    const rangeLabel = formatMonthRangeLabel(exportStartMonth, exportEndMonth);
+    const rangeSlug = getMonthRangeSlug(exportStartMonth, exportEndMonth);
 
-    const avgSystolic = bpEntries.length > 0 
-      ? Math.round(bpEntries.reduce((acc, curr) => acc + (curr.systolic || 0), 0) / bpEntries.length) 
-      : null;
-    const avgDiastolic = bpEntries.length > 0
-      ? Math.round(bpEntries.reduce((acc, curr) => acc + (curr.diastolic || 0), 0) / bpEntries.length)
-      : null;
-    const avgPulse = pulseEntries.length > 0
-      ? Math.round(pulseEntries.reduce((acc, curr) => acc + (curr.pulse || 0), 0) / pulseEntries.length)
-      : null;
+    const escapeCsv = (val: any) => `"${String(val ?? '').replace(/"/g, '""')}"`;
 
-    const avgBpStr = (avgSystolic && avgDiastolic) ? `${avgSystolic}/${avgDiastolic}` : 'N/A';
-    const avgPulseStr = avgPulse ? `${avgPulse}` : 'N/A';
-
-    // Define headers exactly as requested
-    const headers = ["Patient Name", "Email", "Average Blood Pressure (mmHg)", "Average Pulse Rate (bpm)"];
-    
-    // Format rows
-    const csvRows = [
-      headers.join(','), // Header row
-      [
-        `"${selectedPat.name.replace(/"/g, '""')}"`,
-        `"${selectedPat.email.replace(/"/g, '""')}"`,
-        `"${avgBpStr}"`,
-        `"${avgPulseStr}"`
-      ].join(',')
+    const headers = [
+      "User ID",
+      "First Name",
+      "Last Name",
+      "Sex",
+      "DOB",
+      "Telephone",
+      "Average Systolic",
+      "Average Diastolic",
+      "Average BPM",
+      "Date of Reading Taken",
+      "Registered Symptoms",
+      "Mood Score",
+      "Perceived Stress",
+      "Comfort Standing",
+      "Medication Adherence"
     ];
 
-    const csvString = csvRows.join("\n");
+    const rows: string[][] = [];
+
+    if (patientEntries.length === 0) {
+      const emptyNote = allPatientEntries.length === 0
+        ? "No readings logged"
+        : `No readings logged in selected period (${rangeLabel})`;
+
+      rows.push([
+        demo.userId,
+        demo.firstName,
+        demo.lastName,
+        demo.sex,
+        demo.dob,
+        phone,
+        "N/A",
+        "N/A",
+        "N/A",
+        emptyNote,
+        "N/A",
+        "N/A",
+        "N/A",
+        "N/A",
+        "N/A"
+      ]);
+    } else {
+      patientEntries.forEach(entry => {
+        rows.push([
+          demo.userId,
+          demo.firstName,
+          demo.lastName,
+          demo.sex,
+          demo.dob,
+          phone,
+          entry.systolic !== undefined ? String(entry.systolic) : 'N/A',
+          entry.diastolic !== undefined ? String(entry.diastolic) : 'N/A',
+          entry.pulse !== undefined ? String(entry.pulse) : 'N/A',
+          entry.dateOfReading || entry.timestamp || 'N/A',
+          formatSymptoms(entry.symptoms),
+          entry.mood !== undefined ? String(entry.mood) : 'N/A',
+          entry.stress !== undefined ? String(entry.stress) : 'N/A',
+          entry.feeling || (entry.comfortScore !== undefined ? `${entry.comfortScore}% Relief` : (entry.reliefScore !== undefined ? `${entry.reliefScore}% Relief` : 'N/A')),
+          entry.medicationAdherence || 'N/A'
+        ]);
+      });
+    }
+
+    const csvString = [
+      headers.map(escapeCsv).join(','),
+      ...rows.map(r => r.map(escapeCsv).join(','))
+    ].join("\n");
+
     const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    const fileName = `patient_summary_${selectedPat.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}.csv`;
+    const fileName = `clinical_export_patient_${demo.userId}_${selectedPat.name.toLowerCase().replace(/[^a-z0-9]/g, "_")}_${rangeSlug}.csv`;
     link.setAttribute("download", fileName);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    onTriggerToast(`CSV Clinical Metrics Summary exported for ${selectedPat.name}!`, 'success');
+    onTriggerToast(`CSV Clinical Records (${patientEntries.length} entries) exported for ${selectedPat.name} (ID: ${demo.userId}) [${rangeLabel}]!`, 'success');
   };
 
   const handleExportAllPatientsToCSV = () => {
@@ -1120,50 +1493,102 @@ export default function AdminLayout({
       return;
     }
 
-    const headers = ["Patient Name", "Email", "Average Blood Pressure (mmHg)", "Average Pulse Rate (bpm)", "Total Records Logged"];
-    
-    const rows = patients.map(pat => {
-      const patientEntries = ahomkaEntries.filter(entry => 
-        entry.patientId === pat.id || (!entry.patientId && pat.id === 'usr-1')
+    const escapeCsv = (val: any) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+    const rangeLabel = formatMonthRangeLabel(exportStartMonth, exportEndMonth);
+    const rangeSlug = getMonthRangeSlug(exportStartMonth, exportEndMonth);
+
+    const headers = [
+      "User ID",
+      "First Name",
+      "Last Name",
+      "Sex",
+      "DOB",
+      "Telephone",
+      "Average Systolic",
+      "Average Diastolic",
+      "Average BPM",
+      "Date of Reading Taken",
+      "Registered Symptoms",
+      "Mood Score",
+      "Perceived Stress",
+      "Comfort Standing",
+      "Medication Adherence"
+    ];
+
+    const rows: string[][] = [];
+    let totalEntriesExported = 0;
+
+    patients.forEach(pat => {
+      const demo = getUserDemographics(pat);
+      const phone = pat.phone || pat.emergencyContactPhone || 'N/A';
+
+      const allPatientEntries = getPatientVitalsRecords(pat);
+      const patientEntries = allPatientEntries.filter(entry => 
+        isRecordInMonthRange(entry.dateOfReading || entry.timestamp, entry.id, exportStartMonth, exportEndMonth)
       );
 
-      const bpEntries = patientEntries.filter(e => e.systolic !== undefined && e.diastolic !== undefined);
-      const pulseEntries = patientEntries.filter(e => e.pulse !== undefined);
+      if (patientEntries.length === 0) {
+        const emptyNote = allPatientEntries.length === 0
+          ? "No readings logged"
+          : `No readings logged in selected period (${rangeLabel})`;
 
-      const avgSystolic = bpEntries.length > 0 
-        ? Math.round(bpEntries.reduce((acc, curr) => acc + (curr.systolic || 0), 0) / bpEntries.length) 
-        : null;
-      const avgDiastolic = bpEntries.length > 0
-        ? Math.round(bpEntries.reduce((acc, curr) => acc + (curr.diastolic || 0), 0) / bpEntries.length)
-        : null;
-      const avgPulse = pulseEntries.length > 0
-        ? Math.round(pulseEntries.reduce((acc, curr) => acc + (curr.pulse || 0), 0) / pulseEntries.length)
-        : null;
-
-      const avgBpStr = (avgSystolic && avgDiastolic) ? `${avgSystolic}/${avgDiastolic}` : 'N/A';
-      const avgPulseStr = avgPulse ? `${avgPulse}` : 'N/A';
-
-      return [
-        `"${pat.name.replace(/"/g, '""')}"`,
-        `"${pat.email.replace(/"/g, '""')}"`,
-        `"${avgBpStr}"`,
-        `"${avgPulseStr}"`,
-        patientEntries.length
-      ].join(',');
+        rows.push([
+          demo.userId,
+          demo.firstName,
+          demo.lastName,
+          demo.sex,
+          demo.dob,
+          phone,
+          "N/A",
+          "N/A",
+          "N/A",
+          emptyNote,
+          "N/A",
+          "N/A",
+          "N/A",
+          "N/A",
+          "N/A"
+        ]);
+      } else {
+        totalEntriesExported += patientEntries.length;
+        patientEntries.forEach(entry => {
+          rows.push([
+            demo.userId,
+            demo.firstName,
+            demo.lastName,
+            demo.sex,
+            demo.dob,
+            phone,
+            entry.systolic !== undefined ? String(entry.systolic) : 'N/A',
+            entry.diastolic !== undefined ? String(entry.diastolic) : 'N/A',
+            entry.pulse !== undefined ? String(entry.pulse) : 'N/A',
+            entry.dateOfReading || entry.timestamp || 'N/A',
+            formatSymptoms(entry.symptoms),
+            entry.mood !== undefined ? String(entry.mood) : 'N/A',
+            entry.stress !== undefined ? String(entry.stress) : 'N/A',
+            entry.feeling || (entry.comfortScore !== undefined ? `${entry.comfortScore}% Relief` : (entry.reliefScore !== undefined ? `${entry.reliefScore}% Relief` : 'N/A')),
+            entry.medicationAdherence || 'N/A'
+          ]);
+        });
+      }
     });
 
-    const csvString = [headers.join(','), ...rows].join("\n");
+    const csvString = [
+      headers.map(escapeCsv).join(','),
+      ...rows.map(r => r.map(escapeCsv).join(','))
+    ].join("\n");
+
     const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", "all_patients_clinical_vitals.csv");
+    link.setAttribute("download", `all_patients_clinical_records_export_${rangeSlug}_${Date.now()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    onTriggerToast(`Full Patient Registry CSV populated with clinical outcome averages exported!`, 'success');
+    onTriggerToast(`Full Patient Registry CSV (${rows.length} rows, ${totalEntriesExported} readings) exported for [${rangeLabel}]!`, 'success');
   };
 
   // Full System State Excel Export Function (.xlsx)
@@ -1171,26 +1596,63 @@ export default function AdminLayout({
     try {
       const wb = XLSX.utils.book_new();
 
+      const formatSymptoms = (symptoms?: string[]) => {
+        if (!symptoms || symptoms.length === 0) return "No Symptoms";
+        const valid = symptoms.filter(s => s && s.trim() && s !== "No Symptoms");
+        return valid.length > 0 ? valid.join(", ") : "No Symptoms";
+      };
+
       // Sheet 1: User Registry
-      const usersData = users.map(u => ({
-        "User ID": u.id,
-        "Full Name": u.name,
-        "Email Address": u.email,
-        "Role": u.role,
-        "Status": u.status,
-        "Verified": u.verified ? "Yes" : "No",
-        "Phone Number": u.phone || "N/A",
-        "Gender": u.gender || "N/A",
-        "City": u.city || "N/A",
-        "State/Region": u.state || "N/A",
-        "Primary Condition": u.primaryDiagnosis || "N/A",
-        "Language": u.preferredLanguage || "English",
-        "Emergency Contact": u.emergencyContact || "N/A",
-      }));
+      const usersData = users.map(u => {
+        const demo = getUserDemographics(u);
+        return {
+          "User ID": demo.userId,
+          "First Name": demo.firstName,
+          "Last Name": demo.lastName,
+          "Sex": demo.sex,
+          "DOB": demo.dob,
+          "Telephone": u.phone || u.emergencyContactPhone || "N/A",
+          "Email Address": u.email,
+          "Role": u.role,
+          "Status": u.status,
+          "Verified": u.verified ? "Yes" : "No",
+          "City": u.city || "N/A",
+          "State/Region": u.state || "N/A",
+          "Primary Diagnosis": u.primaryDiagnosis || "N/A",
+          "Language": u.preferredLanguage || "English"
+        };
+      });
       const wsUsers = XLSX.utils.json_to_sheet(usersData);
       XLSX.utils.book_append_sheet(wb, wsUsers, "User Registry");
 
-      // Sheet 2: Biometric Telemetry Logs
+      // Sheet 2: Clinical Vitals & Survey Responses (Symptoms, Mood, Stress, Comfort, Adherence)
+      const ahomkaData = ahomkaEntries.map(e => {
+        const patient = users.find(u => u.id === e.patientId) || users.find(u => u.role === 'patient');
+        const demo = patient ? getUserDemographics(patient) : { userId: e.userId || '0001', firstName: e.firstName || 'Unknown', lastName: e.lastName || 'Patient', sex: e.sex || 'Female', dob: e.dob || '1990-01-01' };
+        const phone = patient ? (patient.phone || patient.emergencyContactPhone || 'N/A') : 'N/A';
+
+        return {
+          "User ID": demo.userId,
+          "First Name": demo.firstName,
+          "Last Name": demo.lastName,
+          "Sex": demo.sex,
+          "DOB": demo.dob,
+          "Telephone": phone,
+          "Average Systolic": e.systolic ?? "N/A",
+          "Average Diastolic": e.diastolic ?? "N/A",
+          "Average BPM": e.pulse ?? "N/A",
+          "Date of Reading Taken": e.dateOfReading || e.timestamp || "N/A",
+          "Registered Symptoms": formatSymptoms(e.symptoms),
+          "Mood Score": e.mood ?? "N/A",
+          "Perceived Stress": e.stress ?? "N/A",
+          "Comfort Standing": e.feeling || (e.comfortScore !== undefined ? `${e.comfortScore}% Relief` : (e.reliefScore !== undefined ? `${e.reliefScore}% Relief` : "N/A")),
+          "Medication Adherence": e.medicationAdherence || "N/A"
+        };
+      });
+      const wsAhomka = XLSX.utils.json_to_sheet(ahomkaData);
+      XLSX.utils.book_append_sheet(wb, wsAhomka, "Clinical Vitals & Surveys");
+
+      // Sheet 3: Biometric Telemetry Logs
       const logsData = logs.map(l => ({
         "Log ID": l.id,
         "Patient Name": l.patientName || "N/A",
@@ -1205,26 +1667,6 @@ export default function AdminLayout({
       }));
       const wsLogs = XLSX.utils.json_to_sheet(logsData);
       XLSX.utils.book_append_sheet(wb, wsLogs, "Biometric Logs");
-
-      // Sheet 3: Ahomka Ho Check-Ins
-      const ahomkaData = ahomkaEntries.map(e => ({
-        "Entry ID": e.id,
-        "Patient ID": e.patientId,
-        "Timestamp": e.timestamp,
-        "Systolic BP (mmHg)": e.systolic ?? "N/A",
-        "Diastolic BP (mmHg)": e.diastolic ?? "N/A",
-        "Pulse (bpm)": e.pulse ?? "N/A",
-        "Mood Rating (1-10)": e.mood,
-        "Stress Level (1-10)": e.stress,
-        "Pain Severity (1-10)": e.painLevel,
-        "Calculated Relief Score (%)": `${e.comfortScore}%`,
-        "Feeling Description": e.feeling || "N/A",
-        "Medication Adherence": e.medicationAdherence || "N/A",
-        "Reported Symptoms": (e.symptoms || []).join(", "),
-        "Clinical Notes": e.notes
-      }));
-      const wsAhomka = XLSX.utils.json_to_sheet(ahomkaData);
-      XLSX.utils.book_append_sheet(wb, wsAhomka, "Ahomka Relief Index");
 
       // Sheet 4: Audit Trails & Operational Security
       const auditData = auditLogs.map(a => ({
@@ -2569,63 +3011,192 @@ export default function AdminLayout({
             </div>
 
             {/* Download Patient Health Summary Card */}
-            <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border shadow-xs space-y-4 animate-fade-in">
-              <div>
-                <h4 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-emerald-600" />
-                  <span>Download Patient Clinician Summary</span>
-                </h4>
-                <p className="text-[11px] text-slate-400 mt-1">Select any registered patient below to compile and download their comprehensive historical biometrics and tele-care encounters report.</p>
+            <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-5 animate-fade-in">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+                <div>
+                  <h4 className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span>Clinical Patient Telemetry & Biometrics Export Center</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                    Export clinical telemetry records, blood pressure vitals, and socio-demographics for a single patient or the entire patient cohort with custom month range filtering.
+                  </p>
+                </div>
+                
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[10px] uppercase font-mono font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 px-2.5 py-1 rounded-md">
+                    15-Column Clinical CSV
+                  </span>
+                </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row sm:items-end gap-4">
-                <div className="flex-1">
-                  <label id="selected-download-patient-label" className="text-[10px] uppercase font-bold text-slate-400 block mb-1.5">Select Targeted Patient</label>
+              {/* Controls Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                {/* Target Patient Selector */}
+                <div className="md:col-span-4 space-y-1.5">
+                  <label id="selected-download-patient-label" className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block">
+                    1. Select Patient Target
+                  </label>
                   <select 
                     id="patient-select-download"
                     value={selectedDownloadPatientId}
                     onChange={(e) => setSelectedDownloadPatientId(e.target.value)}
-                    className="w-full bg-slate-50 dark:bg-slate-800 border dark:border-slate-700 py-2.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-white focus:outline-none"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 py-2.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
                   >
-                    {patients.map(p => (
-                      <option key={p.id} value={p.id} className="text-slate-900">{p.name} ({p.email})</option>
-                    ))}
+                    <option value="all" className="text-slate-900 font-bold">
+                      🌟 All Registered Patients ({patients.length} cohort total)
+                    </option>
+                    <optgroup label="Individual Registered Patients">
+                      {patients.map(p => {
+                        const demo = getUserDemographics(p);
+                        return (
+                          <option key={p.id} value={p.id} className="text-slate-900">
+                            {p.name} (ID: {demo.userId}) — {p.email}
+                          </option>
+                        );
+                      })}
+                    </optgroup>
                     {patients.length === 0 && (
                       <option value="" className="text-slate-900">No patients registered</option>
                     )}
                   </select>
+                  <p className="text-[10px] text-slate-400">
+                    {selectedDownloadPatientId === 'all' 
+                      ? 'Batch exporting all patients in the registry.' 
+                      : 'Selected individual patient for targeted clinical extraction.'}
+                  </p>
                 </div>
-                <div className="flex flex-wrap gap-3">
-                  <button 
-                    id="download-health-summary-btn"
-                    onClick={handleDownloadHealthSummary}
-                    disabled={patients.length === 0}
-                    className="py-2.5 px-5 bg-emerald-600 hover:bg-slate-900 text-white font-bold rounded-lg text-xs transition flex items-center justify-center gap-2 shadow-sm hover:shadow-md disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 disabled:shadow-none font-sans cursor-pointer"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Generate Health Summary PDF</span>
-                  </button>
-                  <button 
-                    id="export-health-summary-csv-btn"
-                    onClick={handleExportToCSV}
-                    disabled={patients.length === 0}
-                    className="py-2.5 px-5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition flex items-center justify-center gap-2 shadow-sm hover:shadow-md disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 disabled:shadow-none font-sans cursor-pointer"
-                    title="Export Selected Patient Name, Email, Average Blood Pressure, and Average Pulse Rate to CSV"
-                  >
-                    <FileText className="w-4 h-4" />
-                    <span>Export Patient CSV</span>
-                  </button>
-                  <button 
-                    id="export-all-patients-csv-btn"
-                    onClick={handleExportAllPatientsToCSV}
-                    disabled={patients.length === 0}
-                    className="py-2.5 px-5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-lg text-xs transition flex items-center justify-center gap-2 shadow-sm hover:shadow-md disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 disabled:shadow-none font-sans cursor-pointer"
-                    title="Export All Patients Clinical Outcomes Registry to CSV spreadsheet"
-                  >
-                    <FileText className="w-4 h-4" />
-                    <span>Export All Patients CSV</span>
-                  </button>
+
+                {/* Month Preset Selector */}
+                <div className="md:col-span-3 space-y-1.5">
+                  <label htmlFor="export-month-preset-select" className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block">
+                    2. Month Range Preset
+                  </label>
+                  <div className="relative">
+                    <select
+                      id="export-month-preset-select"
+                      value={exportMonthPreset}
+                      onChange={(e) => handleMonthPresetChange(e.target.value as ExportMonthPreset)}
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 py-2.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 cursor-pointer"
+                    >
+                      <option value="all">All Months (Complete History)</option>
+                      <option value="current">Current Month ({formatMonthName(getMonthPresetRange('current').startMonth)})</option>
+                      <option value="last_month">Previous Month ({formatMonthName(getMonthPresetRange('last_month').startMonth)})</option>
+                      <option value="last_3_months">Past 3 Months</option>
+                      <option value="last_6_months">Past 6 Months</option>
+                      <option value="last_12_months">Past 12 Months</option>
+                      <option value="custom">Custom Month Range (Pick Below)</option>
+                    </select>
+                  </div>
+                  <p className="text-[10px] text-slate-400">
+                    Filter readings by month taken.
+                  </p>
                 </div>
+
+                {/* Start & End Month Inputs */}
+                <div className="md:col-span-5 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] uppercase font-bold text-slate-400 dark:text-slate-500 block">
+                      3. Custom Month Boundary (Start & End)
+                    </label>
+                    {(exportStartMonth || exportEndMonth || exportMonthPreset !== 'all') && (
+                      <button
+                        type="button"
+                        onClick={handleResetMonthFilter}
+                        className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                      >
+                        Reset to All Months
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <div className="text-[9px] uppercase font-bold text-slate-400 mb-0.5">From Month:</div>
+                      <input
+                        id="export-start-month-input"
+                        type="month"
+                        value={exportStartMonth}
+                        onChange={(e) => handleStartMonthChange(e.target.value)}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 py-2 px-2.5 rounded-lg text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-[9px] uppercase font-bold text-slate-400 mb-0.5">To Month:</div>
+                      <input
+                        id="export-end-month-input"
+                        type="month"
+                        value={exportEndMonth}
+                        onChange={(e) => handleEndMonthChange(e.target.value)}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 py-2 px-2.5 rounded-lg text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-400 truncate">
+                    Window: <span className="font-semibold text-slate-700 dark:text-slate-200">{formatMonthRangeLabel(exportStartMonth, exportEndMonth)}</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Active Filter & Live Metric Status Bar */}
+              <div className="bg-slate-50 dark:bg-slate-800/60 p-3.5 rounded-lg border border-slate-200/80 dark:border-slate-700/80 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2.5">
+                  <Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <div>
+                    <span className="font-bold text-slate-800 dark:text-slate-200">
+                      Selected Period:
+                    </span>{' '}
+                    <span className="font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-100/70 dark:bg-emerald-950/60 px-2 py-0.5 rounded text-[11px] font-mono">
+                      {formatMonthRangeLabel(exportStartMonth, exportEndMonth)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-4 text-[11px]">
+                  {selectedDownloadPatientId !== 'all' ? (
+                    <div className="text-slate-600 dark:text-slate-300">
+                      Targeted Patient: <strong className="text-slate-900 dark:text-white">{exportPreviewStats.selectedPatientFiltered}</strong> of {exportPreviewStats.selectedPatientTotal} readings in range
+                    </div>
+                  ) : null}
+                  <div className="text-slate-600 dark:text-slate-300">
+                    Cohort Total: <strong className="text-slate-900 dark:text-white">{exportPreviewStats.cohortFiltered}</strong> of {exportPreviewStats.cohortTotal} readings in range
+                  </div>
+                </div>
+              </div>
+
+              {/* Export Buttons */}
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <button 
+                  id="export-health-summary-csv-btn"
+                  onClick={handleExportToCSV}
+                  disabled={patients.length === 0}
+                  className="py-2.5 px-5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition flex items-center justify-center gap-2 shadow-sm hover:shadow-md disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 disabled:shadow-none cursor-pointer"
+                  title="Export CSV filtered by selected month range"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>{selectedDownloadPatientId === 'all' ? 'Export All Patients CSV' : 'Export Patient CSV'}</span>
+                </button>
+
+                <button 
+                  id="export-all-patients-csv-btn"
+                  onClick={handleExportAllPatientsToCSV}
+                  disabled={patients.length === 0}
+                  className="py-2.5 px-5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-lg text-xs transition flex items-center justify-center gap-2 shadow-sm hover:shadow-md disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 disabled:shadow-none cursor-pointer"
+                  title="Export All Patients in registry filtered by selected month range"
+                >
+                  <Users className="w-4 h-4" />
+                  <span>Export All Patients CSV</span>
+                </button>
+
+                <button 
+                  id="download-health-summary-btn"
+                  onClick={handleDownloadHealthSummary}
+                  disabled={patients.length === 0 || selectedDownloadPatientId === 'all'}
+                  className="py-2.5 px-5 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-bold rounded-lg text-xs transition flex items-center justify-center gap-2 shadow-sm hover:shadow-md disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 disabled:shadow-none cursor-pointer"
+                  title={selectedDownloadPatientId === 'all' ? 'Select an individual patient to generate clinician PDF' : 'Generate Health Summary PDF for selected patient'}
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Generate Health Summary PDF</span>
+                </button>
               </div>
             </div>
 
@@ -2762,6 +3333,15 @@ export default function AdminLayout({
                     <input 
                       type="email" required value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)}
                       placeholder="e.g. ama.serwaa@example.com"
+                      className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-1 col-span-1">
+                    <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Telephone</label>
+                    <input 
+                      type="tel" value={regPhone} onChange={(e) => setRegPhone(e.target.value)}
+                      placeholder="e.g. +233 24 123 4567"
                       className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
                     />
                   </div>
@@ -4397,6 +4977,10 @@ export default function AdminLayout({
                     <div>
                       <span className="text-[9px] font-semibold text-slate-400 uppercase font-mono block">Assigned 4-Digit ID</span>
                       <p className="font-bold text-emerald-600 dark:text-emerald-400 font-mono">{formatUserId(selectedProfileUser.id)}</p>
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-semibold text-slate-400 uppercase font-mono block">Telephone</span>
+                      <p className="font-bold text-slate-800 dark:text-slate-200 font-mono">{selectedProfileUser.phone || selectedProfileUser.emergencyContactPhone || 'N/A'}</p>
                     </div>
                   </div>
 

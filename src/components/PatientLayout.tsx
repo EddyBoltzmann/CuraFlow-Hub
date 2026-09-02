@@ -19,7 +19,7 @@ import {
   ResponsiveContainer, AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine 
 } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
-import { formatUserId } from '../utils/userId';
+import { formatUserId, getUserDemographics } from '../utils/userId';
 
 interface PatientLayoutProps {
   session: AppUser;
@@ -120,6 +120,12 @@ export default function PatientLayout({
   const [profName, setProfName] = useState(session.name);
   const [profEmail, setProfEmail] = useState(session.email);
   const [profAvatar, setProfAvatar] = useState(session.avatar || '');
+  const [profPhone, setProfPhone] = useState(session.phone || '');
+  const [profMarital, setProfMarital] = useState(session.maritalStatus || 'Married');
+  const [profEmployment, setProfEmployment] = useState(session.employmentStatus || 'Employed Full-time');
+  const [profEducation, setProfEducation] = useState(session.educationLevel || "Bachelor's Degree");
+  const [profLanguage, setProfLanguage] = useState(session.preferredLanguage || 'English');
+  const [profDiagnosis, setProfDiagnosis] = useState(session.primaryDiagnosis || 'Hypertension Monitoring');
   const [profContactName, setProfContactName] = useState(session.emergencyContactName || '');
   const [profContactPhone, setProfContactPhone] = useState(session.emergencyContactPhone || '');
   const [profContactRelation, setProfContactRelation] = useState(session.emergencyContactRelation || '');
@@ -130,6 +136,35 @@ export default function PatientLayout({
   const [profAddrCity, setProfAddrCity] = useState(session.addressCity || '');
   const [profAddrState, setProfAddrState] = useState(session.addressState || '');
   const [profAddrZip, setProfAddrZip] = useState(session.addressZip || '');
+
+  // Keep profile local states in sync if session changes
+  useEffect(() => {
+    if (session) {
+      setProfFirstName(session.firstName || (session.name ? session.name.split(' ')[0] : ''));
+      setProfLastName(session.lastName || (session.name ? session.name.split(' ').slice(1).join(' ') : ''));
+      setProfSex(session.sex || session.gender || 'Female');
+      setProfDob(session.dob || '');
+      setProfName(session.name || '');
+      setProfEmail(session.email || '');
+      setProfAvatar(session.avatar || '');
+      setProfPhone(session.phone || '');
+      setProfMarital(session.maritalStatus || 'Married');
+      setProfEmployment(session.employmentStatus || 'Employed Full-time');
+      setProfEducation(session.educationLevel || "Bachelor's Degree");
+      setProfLanguage(session.preferredLanguage || 'English');
+      setProfDiagnosis(session.primaryDiagnosis || 'Hypertension Monitoring');
+      setProfContactName(session.emergencyContactName || '');
+      setProfContactPhone(session.emergencyContactPhone || '');
+      setProfContactRelation(session.emergencyContactRelation || '');
+      setProfInsProvider(session.insuranceProvider || '');
+      setProfInsMemberId(session.insuranceMemberId || '');
+      setProfInsGroupId(session.insuranceGroupId || '');
+      setProfAddrStreet(session.addressStreet || '');
+      setProfAddrCity(session.addressCity || '');
+      setProfAddrState(session.addressState || '');
+      setProfAddrZip(session.addressZip || '');
+    }
+  }, [session]);
 
   // Active healthcare educational video modal & play simulation
   const [playingVideoId, setPlayingVideoId] = useState<string | null>(null);
@@ -149,7 +184,7 @@ export default function PatientLayout({
   const [ahomkaNotes, setAhomkaNotes] = useState<string>('');
 
   // Redesigned Step-by-Step Vitals States from screenshots
-  const [vitalsStep, setVitalsStep] = useState<'dashboard' | 'step1' | 'step2' | 'reading1' | 'rest1' | 'reading2' | 'rest2' | 'reading3'>('dashboard');
+  const [vitalsStep, setVitalsStep] = useState<'dashboard' | 'step1' | 'step2' | 'step3' | 'reading1' | 'rest1' | 'reading2' | 'rest2' | 'reading3'>('dashboard');
   const [vitalsFeeling, setVitalsFeeling] = useState<string>('');
   const [vitalsSymptoms, setVitalsSymptoms] = useState<string[]>([]);
   const [vitalsMedication, setVitalsMedication] = useState<string>('');
@@ -214,39 +249,102 @@ export default function PatientLayout({
   });
 
   const handleExportPatientLogsToCSV = () => {
-    if (ahomkaEntries.length === 0) {
-      onTriggerToast("No logs available to export.", "error");
-      return;
-    }
-    const csvRows = [
-      ["Timestamp", "Averaged Systolic (mmHg)", "Averaged Diastolic (mmHg)", "Averaged Pulse (bpm)", "Physical Well-being", "Medication Adherence Adhered", "Clinical Notes/Symptoms"],
+    const demo = getUserDemographics(session);
+    const phone = session.phone || session.emergencyContactPhone || 'N/A';
+    const patientEntries = ahomkaEntries.filter(entry => 
+      entry.patientId === session.id || 
+      entry.patientId === session.userId || 
+      entry.userId === session.id || 
+      entry.userId === session.userId || 
+      formatUserId(entry.patientId) === formatUserId(session.id) ||
+      formatUserId(entry.userId) === formatUserId(session.id) ||
+      (!entry.patientId && session.id === 'usr-1')
+    );
+
+    const escapeCsv = (val: any) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+
+    const formatSymptoms = (symptoms?: string[]) => {
+      if (!symptoms || symptoms.length === 0) return "No Symptoms";
+      const valid = symptoms.filter(s => s && s.trim() && s !== "No Symptoms");
+      return valid.length > 0 ? valid.join(", ") : "No Symptoms";
+    };
+
+    const headers = [
+      "User ID",
+      "First Name",
+      "Last Name",
+      "Sex",
+      "DOB",
+      "Telephone",
+      "Average Systolic",
+      "Average Diastolic",
+      "Average BPM",
+      "Date of Reading Taken",
+      "Registered Symptoms",
+      "Mood Score",
+      "Perceived Stress",
+      "Comfort Standing",
+      "Medication Adherence"
     ];
 
-    ahomkaEntries.forEach(entry => {
-      const notesEscaped = `"${(entry.notes || '').replace(/"/g, '""')}"`;
-      csvRows.push([
-        entry.timestamp,
-        entry.systolic?.toString() || '',
-        entry.diastolic?.toString() || '',
-        entry.pulse?.toString() || '',
-        entry.feeling || '',
-        entry.medicationAdherence || 'unspecified',
-        notesEscaped
-      ]);
-    });
+    const rows: string[][] = [];
 
-    const csvString = csvRows.map(row => row.join(",")).join("\n");
+    if (patientEntries.length === 0) {
+      rows.push([
+        demo.userId,
+        demo.firstName,
+        demo.lastName,
+        demo.sex,
+        demo.dob,
+        phone,
+        "N/A",
+        "N/A",
+        "N/A",
+        "No readings logged",
+        "N/A",
+        "N/A",
+        "N/A",
+        "N/A",
+        "N/A"
+      ]);
+    } else {
+      patientEntries.forEach(entry => {
+        rows.push([
+          demo.userId,
+          demo.firstName,
+          demo.lastName,
+          demo.sex,
+          demo.dob,
+          phone,
+          entry.systolic !== undefined ? String(entry.systolic) : 'N/A',
+          entry.diastolic !== undefined ? String(entry.diastolic) : 'N/A',
+          entry.pulse !== undefined ? String(entry.pulse) : 'N/A',
+          entry.dateOfReading || entry.timestamp || 'N/A',
+          formatSymptoms(entry.symptoms),
+          entry.mood !== undefined ? String(entry.mood) : 'N/A',
+          entry.stress !== undefined ? String(entry.stress) : 'N/A',
+          entry.feeling || (entry.comfortScore !== undefined ? `${entry.comfortScore}% Relief` : (entry.reliefScore !== undefined ? `${entry.reliefScore}% Relief` : 'N/A')),
+          entry.medicationAdherence || 'N/A'
+        ]);
+      });
+    }
+
+    const csvString = [
+      headers.map(escapeCsv).join(','),
+      ...rows.map(r => r.map(escapeCsv).join(','))
+    ].join("\n");
+
     const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
     const patientNameClean = session.name.toLowerCase().replace(/[^a-z0-9]/g, "_");
-    link.setAttribute("download", `ahomka_ho_bp_logs_${patientNameClean}.csv`);
+    link.setAttribute("download", `clinical_export_patient_${demo.userId}_${patientNameClean}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     
-    onTriggerToast("Your blood pressure logs have been exported successfully to CSV!", "success");
+    onTriggerToast("Your blood pressure clinical records have been exported successfully to CSV!", "success");
   };
 
   // Patient educational resources
@@ -256,17 +354,52 @@ export default function PatientLayout({
     { id: 'v3', title: 'Developing Clear REM Vectors for Nightly Recovery', duration: '8:12', category: 'Sleep', views: 520 }
   ];
 
-  // Daily checklists state
-  const [reminders, setReminders] = useState([
-    { id: 'rem-1', label: 'Monitor Blood Glucose (Fasting state)', done: true },
+  // Daily checklists state with localStorage persistence per patient
+  const storageKey = `curaflow_daily_reminders_${session?.id || 'default'}`;
+  const DEFAULT_REMINDERS = [
+    { id: 'rem-1', label: 'Monitor Blood Glucose (Fasting state)', done: false },
     { id: 'rem-2', label: 'Submit Heart Rate log pre-dinner walking', done: false },
     { id: 'rem-3', label: 'Read: Circadian sleep index analysis', done: false },
-    { id: 'rem-4', label: 'Walk 15 minutes post glycemic intake', done: true }
-  ]);
+    { id: 'rem-4', label: 'Walk 15 minutes post glycemic intake', done: false }
+  ];
+
+  const [reminders, setReminders] = useState<Array<{ id: string; label: string; done: boolean }>>(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch {
+      // ignore
+    }
+    return DEFAULT_REMINDERS;
+  });
+
+  // Sync state if session changes
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`curaflow_daily_reminders_${session?.id || 'default'}`);
+      if (saved) {
+        setReminders(JSON.parse(saved));
+      } else {
+        setReminders(DEFAULT_REMINDERS);
+      }
+    } catch {
+      setReminders(DEFAULT_REMINDERS);
+    }
+  }, [session?.id]);
 
   const toggleReminder = (id: string) => {
-    setReminders(reminders.map(r => r.id === id ? { ...r, done: !r.done } : r));
-    onTriggerToast('Checked reminder update success');
+    setReminders(prev => {
+      const updated = prev.map(r => r.id === id ? { ...r, done: !r.done } : r);
+      try {
+        localStorage.setItem(`curaflow_daily_reminders_${session?.id || 'default'}`, JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+      return updated;
+    });
+    onTriggerToast('Reminder status updated', 'success');
   };
 
   // Countdown Timer and Rest Period Slideshow Auto-rotation support
@@ -383,6 +516,12 @@ export default function PatientLayout({
       age: calculatedAge,
       email: profEmail,
       avatar: profAvatar,
+      phone: profPhone.trim() || undefined,
+      maritalStatus: profMarital,
+      employmentStatus: profEmployment,
+      educationLevel: profEducation,
+      preferredLanguage: profLanguage,
+      primaryDiagnosis: profDiagnosis.trim() || undefined,
       emergencyContactName: profContactName,
       emergencyContactPhone: profContactPhone,
       emergencyContactRelation: profContactRelation,
@@ -395,7 +534,7 @@ export default function PatientLayout({
       addressZip: profAddrZip
     };
     onUpdateProfile(updated);
-    onTriggerToast('Healthcare account profile committed successfully!', 'success');
+    onTriggerToast('Healthcare account & socio-demographic profile updated across database!', 'success');
   };
 
   // Recommendation 1: Dynamic Initial SVG Creator & Custom Image reader
@@ -1184,9 +1323,26 @@ export default function PatientLayout({
               
               {/* Daily Checklist cards */}
               <div className="bg-white dark:bg-slate-900 p-6 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
-                <div>
-                  <h4 className="font-bold text-xs text-slate-900 dark:text-white">Active Daily Reminders</h4>
-                  <p className="text-[10px] text-slate-400">Complete tasks to optimize your wellness index</p>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-bold text-xs text-slate-900 dark:text-white">Active Daily Reminders</h4>
+                    <p className="text-[10px] text-slate-400">Complete tasks to optimize your wellness index</p>
+                  </div>
+                  {reminders.some(r => r.done) && (
+                    <button
+                      onClick={() => {
+                        const reset = reminders.map(r => ({ ...r, done: false }));
+                        setReminders(reset);
+                        try {
+                          localStorage.setItem(`curaflow_daily_reminders_${session?.id || 'default'}`, JSON.stringify(reset));
+                        } catch {}
+                        onTriggerToast('All daily reminders unchecked', 'info');
+                      }}
+                      className="text-[10px] font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 hover:underline"
+                    >
+                      Uncheck all
+                    </button>
+                  )}
                 </div>
                 
                 <div className="space-y-2">
@@ -2051,7 +2207,7 @@ export default function PatientLayout({
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
                 <div className="p-6 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 1 of 5</span>
+                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 1 of 6 (Pre-Reading)</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">Physical Comfort State</h3>
                   </div>
                   <button onClick={resetVitalsForm} className="text-slate-400 hover:text-slate-600 text-xs font-bold">Cancel</button>
@@ -2107,7 +2263,7 @@ export default function PatientLayout({
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
                 <div className="p-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 2 of 5</span>
+                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 2 of 6 (Pre-Reading)</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">Active Symptoms Checklist</h3>
                   </div>
                   <button onClick={resetVitalsForm} className="text-slate-400 hover:text-slate-600 text-xs font-bold">Cancel</button>
@@ -2160,6 +2316,69 @@ export default function PatientLayout({
                     </button>
                     <button
                       disabled={vitalsSymptoms.length === 0}
+                      onClick={() => setVitalsStep('step3')}
+                      className="px-6 py-2.5 bg-emerald-600 disabled:opacity-50 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition"
+                    >
+                      Next: Medication Adherence
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* WIZARD STEP 3: Medication Adherence (Pre-Reading) */}
+            {vitalsStep === 'step3' && (
+              <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
+                <div className="p-6 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
+                  <div>
+                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 3 of 6 (Pre-Reading)</span>
+                    <h3 className="font-bold text-sm text-slate-900 dark:text-white">Medication Adherence Status</h3>
+                  </div>
+                  <button onClick={resetVitalsForm} className="text-slate-400 hover:text-slate-600 text-xs font-bold">Cancel</button>
+                </div>
+
+                <div className="p-6 space-y-6">
+                  <div>
+                    <h4 className="font-bold text-xs text-slate-700 dark:text-slate-300 mb-2 uppercase tracking-wide">
+                      Within the past 4 days, did you take your BP medication?
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      Accurate medication compliance tracking provides vital context for your blood pressure readings and doctor evaluations.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {[
+                      'I took it exactly as prescribed',
+                      'I missed my medication on one day',
+                      'I missed my medication on more than one day',
+                      'I did not take my medication'
+                    ].map(adherenceOpt => (
+                      <div
+                        key={adherenceOpt}
+                        onClick={() => setVitalsMedication(adherenceOpt)}
+                        className={`p-3.5 rounded-xl border text-xs cursor-pointer flex items-center gap-3.5 transition ${
+                          vitalsMedication === adherenceOpt 
+                            ? 'border-emerald-600 bg-emerald-50/40 dark:bg-emerald-950/30 font-bold text-emerald-900 dark:text-emerald-300 shadow-xs' 
+                            : 'hover:bg-slate-50 dark:hover:bg-slate-800 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                          vitalsMedication === adherenceOpt ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-300 dark:border-slate-700'
+                        }`}>
+                          {vitalsMedication === adherenceOpt && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                        </div>
+                        <span className="leading-snug">{adherenceOpt}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex justify-between items-center pt-4 border-t border-slate-100 dark:border-slate-800">
+                    <button onClick={() => setVitalsStep('step2')} className="px-4 py-2.5 text-xs text-slate-500 hover:text-slate-700 font-bold">
+                      Back
+                    </button>
+                    <button
+                      disabled={!vitalsMedication}
                       onClick={() => setVitalsStep('reading1')}
                       className="px-6 py-2.5 bg-emerald-600 disabled:opacity-50 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition"
                     >
@@ -2170,12 +2389,12 @@ export default function PatientLayout({
               </div>
             )}
 
-            {/* WIZARD STEP 3: Blood Pressure Reading #1 Input */}
+            {/* WIZARD STEP 4: Blood Pressure Reading #1 Input */}
             {vitalsStep === 'reading1' && (
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
                 <div className="p-6 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 3 of 5</span>
+                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 4 of 6</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">First Logged Measurement</h3>
                   </div>
                   <button onClick={resetVitalsForm} className="text-slate-400 hover:text-slate-600 text-xs font-bold">Cancel</button>
@@ -2249,7 +2468,7 @@ export default function PatientLayout({
                   )}
 
                   <div className="flex justify-between items-center pt-4 border-t border-slate-100 dark:border-slate-800">
-                    <button onClick={() => setVitalsStep('step2')} className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 font-bold">
+                    <button onClick={() => setVitalsStep('step3')} className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 font-bold">
                       Back
                     </button>
                     <button
@@ -2346,7 +2565,7 @@ export default function PatientLayout({
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
                 <div className="p-6 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 4 of 5</span>
+                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 5 of 6</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">Second Logged Measurement</h3>
                   </div>
                   <button onClick={resetVitalsForm} className="text-slate-400 hover:text-slate-600 text-xs font-bold">Cancel</button>
@@ -2440,7 +2659,7 @@ export default function PatientLayout({
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
                 <div className="p-6 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 4 of 5 (Rest Cooldown)</span>
+                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Rest Interval 2 of 2</span>
                     <h3 className="font-bold text-sm text-slate-900 dark:text-white">Second Comfort Intermission</h3>
                   </div>
                   <button onClick={resetVitalsForm} className="text-slate-400 hover:text-slate-600 text-xs font-bold">Cancel</button>
@@ -2512,13 +2731,13 @@ export default function PatientLayout({
               </div>
             )}
 
-            {/* WIZARD STEP 7: Blood Pressure Reading #3 & Medication Adherence */}
+            {/* WIZARD STEP 7: Blood Pressure Reading #3 & Summary */}
             {vitalsStep === 'reading3' && (
               <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs max-w-xl mx-auto overflow-hidden">
                 <div className="p-6 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center">
                   <div>
-                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 5 of 5</span>
-                    <h3 className="font-bold text-sm text-slate-900 dark:text-white">Final Reading & Medication Adherence</h3>
+                    <span className="text-[9px] font-bold tracking-widest text-emerald-600 uppercase font-mono">Step 6 of 6</span>
+                    <h3 className="font-bold text-sm text-slate-900 dark:text-white">Final Reading & Calculation</h3>
                   </div>
                   <button onClick={resetVitalsForm} className="text-slate-400 hover:text-slate-600 text-xs font-bold">Cancel</button>
                 </div>
@@ -2586,37 +2805,22 @@ export default function PatientLayout({
                     </div>
                   )}
 
-                  {/* Medication adherence checklist within search parameters */}
-                  <div className="space-y-3">
-                    <label className="font-bold text-xs text-slate-700 dark:text-slate-300 block uppercase tracking-wide">
-                      Within the past 4 days, did you take your BP medication?
-                    </label>
-                    <p className="text-[11px] text-slate-400">Strict medical guideline compliance safeguards cardiovascular baselines against sudden stroke episodes.</p>
-                    
-                    <div className="grid grid-cols-1 gap-2.5">
-                      {[
-                        'I took its exactly as prescribed',
-                        'I missed 1 or 2 days total',
-                        'I did not take any medication',
-                        'I have no prescribed blood pressure medications'
-                      ].map(adherenceOpt => (
-                        <div
-                          key={adherenceOpt}
-                          onClick={() => setVitalsMedication(adherenceOpt)}
-                          className={`p-3 rounded-lg border text-xs cursor-pointer flex items-center gap-3 transition ${
-                            vitalsMedication === adherenceOpt 
-                              ? 'border-emerald-600 bg-emerald-50/20 dark:bg-emerald-950/20 font-bold text-emerald-800 dark:text-emerald-300' 
-                              : 'hover:bg-slate-50 dark:hover:bg-slate-800 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
-                          }`}
-                        >
-                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                            vitalsMedication === adherenceOpt ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-300 dark:border-slate-700'
-                          }`}>
-                            {vitalsMedication === adherenceOpt && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
-                          </div>
-                          <span>{adherenceOpt}</span>
-                        </div>
-                      ))}
+                  {/* Pre-reading Context Summary Review Card */}
+                  <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                    <span className="text-[9px] font-bold text-emerald-600 uppercase tracking-widest font-mono block">Pre-Reading Context Summary</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                      <div className="p-2 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">
+                        <span className="text-[9px] text-slate-400 block font-semibold">Physical State:</span>
+                        <p className="font-bold text-slate-800 dark:text-slate-200 truncate">{vitalsFeeling.split('(')[0] || 'Good'}</p>
+                      </div>
+                      <div className="p-2 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">
+                        <span className="text-[9px] text-slate-400 block font-semibold">Symptoms:</span>
+                        <p className="font-bold text-slate-800 dark:text-slate-200 truncate">{vitalsSymptoms.join(', ') || 'None'}</p>
+                      </div>
+                      <div className="p-2 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">
+                        <span className="text-[9px] text-slate-400 block font-semibold">4-Day Adherence:</span>
+                        <p className="font-bold text-emerald-600 dark:text-emerald-400 truncate">{vitalsMedication || 'Reported'}</p>
+                      </div>
                     </div>
                   </div>
 
@@ -2626,7 +2830,7 @@ export default function PatientLayout({
                     </button>
                     <button
                       type="submit"
-                      disabled={!vitalsMedication || !sys3.trim() || !dia3.trim() || !pulse3.trim()}
+                      disabled={!sys3.trim() || !dia3.trim() || !pulse3.trim()}
                       className="px-6 py-2.5 bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition shadow-md shadow-emerald-600/10"
                     >
                       Calculate & Submit Vitals

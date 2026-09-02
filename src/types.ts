@@ -184,6 +184,8 @@ export interface ProviderInfo {
 
 export interface AppointmentBooking {
   id: string;
+  patientId?: string;
+  userId?: string;
   providerId: string;
   providerName: string;
   providerAvatar: string;
