@@ -15,7 +15,7 @@ import {
   Activity, Users, FileText, HelpCircle, Bell, Settings, Plus, Trash2, 
   Check, ShieldAlert, Sparkles, AlertTriangle, Play, Info, EyeOff, Layout, Globe, Server, Download, RefreshCw, TrendingUp,
   MapPin, Shield, GraduationCap, Briefcase, Stethoscope, Database, UserCheck, X, HeartPulse, Filter, User,
-  Calendar, CalendarDays
+  Calendar, CalendarDays, Upload, FileSpreadsheet
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, BarChart, Bar, ReferenceLine, ReferenceArea
@@ -29,6 +29,7 @@ import {
   formatMonthName, 
   isRecordInMonthRange 
 } from '../utils/dateRange';
+import CsvUserImportModal from './CsvUserImportModal';
 
 interface AdminLayoutProps {
   session: AppUser;
@@ -51,6 +52,7 @@ interface AdminLayoutProps {
   onTriggerToast: (msg: string, type?: 'success' | 'info' | 'error') => void;
   onBroadcastPlatformNotification: (text: string) => void;
   onAddUser?: (user: AppUser) => void;
+  onAddMultipleUsers?: (users: AppUser[]) => void;
   onDeleteUser?: (id: string) => void;
   forumBoards: SupportForumBoard[];
   onAddForumBoard: (board: SupportForumBoard) => void;
@@ -229,7 +231,7 @@ export default function AdminLayout({
   session, users, loggedInUserIds, onSimulateTokenRefresh, articles, faqs, announcements, auditLogs, logs, bookings, ahomkaEntries,
   onAddArticle, onArchiveArticle, onModifyUserStatus, onVerifyClinician,
   onAddFAQ, onDeployAnnouncement, onTriggerToast, onBroadcastPlatformNotification,
-  onAddUser, onDeleteUser, forumBoards, onAddForumBoard,
+  onAddUser, onAddMultipleUsers, onDeleteUser, forumBoards, onAddForumBoard,
   weeklyComplaints, onUpdateWeeklyComplaints, engagementData, onUpdateEngagementData,
   onAddAhomkaEntry, onAddLog
 }: AdminLayoutProps) {
@@ -306,6 +308,18 @@ export default function AdminLayout({
   const [bpPatientFilter, setBpPatientFilter] = useState<string>('all');
   const [bpTimeRange, setBpTimeRange] = useState<'7-day' | '30-day' | 'All-time'>('All-time');
   const [showBpRefLines, setShowBpRefLines] = useState<boolean>(true);
+
+  // Batch CSV User Provisioning State
+  const [showCsvImportModal, setShowCsvImportModal] = useState<boolean>(false);
+
+  const handleBatchImportUsers = (newUsers: AppUser[]) => {
+    if (onAddMultipleUsers) {
+      onAddMultipleUsers(newUsers);
+    } else if (onAddUser) {
+      newUsers.forEach(u => onAddUser(u));
+      onTriggerToast(`Batch provisioned ${newUsers.length} accounts successfully!`, 'success');
+    }
+  };
 
   const filteredLogs = logs.filter(log => {
     if (alertFilter === 'high-risk') return log.isHighRisk === true;
@@ -3217,29 +3231,43 @@ export default function AdminLayout({
                 <p className="text-[10px] text-slate-400 mt-0.5">Manage patient baselines, clinician licensing, and moderating sub-administrators</p>
               </div>
 
-              {/* Sub-Tabs Selector */}
-              <div className="flex border border-slate-200 dark:border-slate-800 rounded-xl p-1 bg-slate-50 dark:bg-slate-950/60 font-sans self-start select-none">
-                <button
-                  type="button"
-                  onClick={() => setActiveRegistrySubTab('patients')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeRegistrySubTab === 'patients' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}
-                >
-                  Patients
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveRegistrySubTab('providers')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeRegistrySubTab === 'providers' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}
-                >
-                  Providers
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveRegistrySubTab('sub_admins')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeRegistrySubTab === 'sub_admins' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}
-                >
-                  Sub Admins
-                </button>
+              {/* Sub-Tabs Selector and Batch CSV Action */}
+              <div className="flex flex-wrap items-center gap-2.5 self-start">
+                {session.role === 'admin' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCsvImportModal(true)}
+                    className="py-1.5 px-3 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                    title="Bulk create multiple patient, clinician, or admin accounts from a CSV file"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Import Accounts via CSV</span>
+                  </button>
+                )}
+
+                <div className="flex border border-slate-200 dark:border-slate-800 rounded-xl p-1 bg-slate-50 dark:bg-slate-950/60 font-sans select-none">
+                  <button
+                    type="button"
+                    onClick={() => setActiveRegistrySubTab('patients')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeRegistrySubTab === 'patients' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}
+                  >
+                    Patients
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveRegistrySubTab('providers')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeRegistrySubTab === 'providers' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}
+                  >
+                    Providers
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveRegistrySubTab('sub_admins')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeRegistrySubTab === 'sub_admins' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'}`}
+                  >
+                    Sub Admins
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -3272,14 +3300,26 @@ export default function AdminLayout({
             {/* Provisioning Panels */}
             {activeRegistrySubTab === 'patients' && (session.role === 'admin') && (
               <div className="bg-emerald-50/30 dark:bg-slate-900/40 p-5 rounded-xl border border-emerald-100 dark:border-slate-800 space-y-4 font-sans">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 dark:bg-emerald-400 shrink-0 animate-pulse"></span>
-                  <div>
-                    <h5 className="font-extrabold text-xs uppercase tracking-wider text-slate-900 dark:text-white leading-tight">
-                      Provision New Patient Profile
-                    </h5>
-                    <p className="text-[10px] text-slate-400">Instantly authorize and dispatch secure, audited credentials for a new patient including baseline socio-demographical attributes.</p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 dark:bg-emerald-400 shrink-0 animate-pulse"></span>
+                    <div>
+                      <h5 className="font-extrabold text-xs uppercase tracking-wider text-slate-900 dark:text-white leading-tight">
+                        Provision New Patient Profile
+                      </h5>
+                      <p className="text-[10px] text-slate-400">Instantly authorize and dispatch secure, audited credentials for a new patient including baseline socio-demographical attributes.</p>
+                    </div>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowCsvImportModal(true)}
+                    className="py-1.5 px-3 bg-white dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-slate-700 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 self-start sm:self-auto cursor-pointer shadow-xs shrink-0"
+                    title="Bulk create multiple patient accounts from a CSV file"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Import Patients via CSV</span>
+                  </button>
                 </div>
 
                 <form onSubmit={handleAdminAddUser} className="grid grid-cols-1 sm:grid-cols-4 gap-4 bg-white dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
@@ -3523,14 +3563,26 @@ export default function AdminLayout({
 
             {activeRegistrySubTab === 'providers' && (session.role === 'admin') && (
               <div className="bg-emerald-50/30 dark:bg-slate-900/40 p-5 rounded-xl border border-emerald-100 dark:border-slate-800 space-y-4 font-sans">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 dark:bg-emerald-400 shrink-0"></span>
-                  <div>
-                    <h5 className="font-extrabold text-xs uppercase tracking-wider text-slate-900 dark:text-white leading-tight">
-                      Provision New Clinical Provider Workspace
-                    </h5>
-                    <p className="text-[10px] text-slate-400">Add verified medical practitioners, cardiac doctors, or diagnostic officers to the active directories.</p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 dark:bg-emerald-400 shrink-0"></span>
+                    <div>
+                      <h5 className="font-extrabold text-xs uppercase tracking-wider text-slate-900 dark:text-white leading-tight">
+                        Provision New Clinical Provider Workspace
+                      </h5>
+                      <p className="text-[10px] text-slate-400">Add verified medical practitioners, cardiac doctors, or diagnostic officers to the active directories.</p>
+                    </div>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowCsvImportModal(true)}
+                    className="py-1.5 px-3 bg-white dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-slate-700 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 rounded-xl text-xs font-bold transition flex items-center gap-1.5 self-start sm:self-auto cursor-pointer shadow-xs shrink-0"
+                    title="Bulk create multiple clinician or provider accounts from a CSV file"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Import Providers via CSV</span>
+                  </button>
                 </div>
 
                 <form onSubmit={handleAdminAddUser} className="grid grid-cols-1 sm:grid-cols-4 gap-4 bg-white dark:bg-slate-900/50 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
@@ -5605,6 +5657,17 @@ export default function AdminLayout({
             </form>
           </motion.div>
         </div>
+      )}
+
+      {/* Super Admin - Batch CSV User Provisioning Modal */}
+      {showCsvImportModal && (
+        <CsvUserImportModal
+          isOpen={showCsvImportModal}
+          onClose={() => setShowCsvImportModal(false)}
+          existingUsers={users}
+          onImportUsers={handleBatchImportUsers}
+          onTriggerToast={onTriggerToast}
+        />
       )}
     </div>
   );

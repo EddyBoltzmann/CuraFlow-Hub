@@ -1616,6 +1616,18 @@ export default function App() {
                   );
                   triggerToast(`Successfully registered new ${activeNewUser.role}: ${activeNewUser.name}`, 'success');
                 }}
+                onAddMultipleUsers={(newUsers: AppUser[]) => {
+                  const activeNewUsers = newUsers.map(u => ({ ...u, status: 'Active' as const, verified: true }));
+                  setUsers(prev => [...activeNewUsers, ...prev]);
+                  dispatchAuditLog(
+                    session.id,
+                    session.name,
+                    session.role,
+                    'Batch CSV User Provisioning',
+                    `Super Admin batch-provisioned ${activeNewUsers.length} user accounts via CSV import.`
+                  );
+                  triggerToast(`Successfully imported and provisioned ${activeNewUsers.length} user accounts!`, 'success');
+                }}
                 onAddAhomkaEntry={handleAddAhomkaEntry}
                 onAddLog={handleAddLog}
                 onDeleteUser={handleDeleteUser}
