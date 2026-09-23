@@ -541,7 +541,7 @@ export default function AdminLayout({
       setExportCompleted(true);
       
       let finalContent = "";
-      let filename = `CFL_Secured_Export_${exportDataType}_${Date.now()}`;
+      let filename = `MyBP_Secured_Export_${exportDataType}_${Date.now()}`;
       
       const escapeCsvVal = (val: any) => `"${String(val ?? '').replace(/"/g, '""')}"`;
 
@@ -1167,7 +1167,7 @@ export default function AdminLayout({
     doc.setTextColor(255, 255, 255);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(20);
-    doc.text("CFL PATIENT CLINICAL SUMMARY", 14, 18);
+    doc.text("MYBP COACH CLINICAL SUMMARY", 14, 18);
     
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
@@ -1710,7 +1710,7 @@ export default function AdminLayout({
       const wsBookings = XLSX.utils.json_to_sheet(bookingsData);
       XLSX.utils.book_append_sheet(wb, wsBookings, "Appointments");
 
-      const exportFileName = `CuraFlow_SuperAdmin_SystemState_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const exportFileName = `MyBP_Coach_SuperAdmin_SystemState_${new Date().toISOString().slice(0, 10)}.xlsx`;
       XLSX.writeFile(wb, exportFileName);
 
       onTriggerToast(`System state exported successfully as multi-sheet Excel workbook (${exportFileName})!`, 'success');
@@ -1842,9 +1842,9 @@ export default function AdminLayout({
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
                   <div className="flex items-center gap-2">
                     <div className="px-2 py-0.5 bg-emerald-600 rounded-lg flex items-center justify-center text-white text-xs font-black shadow-lg">
-                      CFL
+                      MyBP
                     </div>
-                    <span className="font-sans font-bold text-slate-900 dark:text-white">Admin Portals</span>
+                    <span className="font-sans font-bold text-slate-900 dark:text-white">MyBP Coach Admin</span>
                   </div>
                   <button
                     onClick={() => setIsMobileMenuOpen(false)}
@@ -1922,7 +1922,7 @@ export default function AdminLayout({
               </div>
 
               <div className="border-t border-slate-100 dark:border-slate-800 pt-4 mt-6 text-center">
-                <span className="text-[9px] text-slate-400 font-mono">CFL Core Secure Platform v2.4</span>
+                <span className="text-[9px] text-slate-400 font-mono">MyBP Coach Secure Platform v2.4</span>
               </div>
             </motion.div>
           </div>
@@ -3598,7 +3598,7 @@ export default function AdminLayout({
                     <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Email Address</label>
                     <input 
                       type="email" required value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)}
-                      placeholder="e.g. jenkins@curaflow.com"
+                      placeholder="e.g. jenkins@mybpcoach.com"
                       className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
                     />
                   </div>
@@ -3693,7 +3693,7 @@ export default function AdminLayout({
                       <label className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 uppercase tracking-widest block font-mono">Email Address</label>
                       <input 
                         type="email" required value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)}
-                        placeholder="e.g. carl.admin@curaflow.com"
+                        placeholder="e.g. carl.admin@mybpcoach.com"
                         className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:outline-none py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-900 dark:text-gray-100 transition-all shadow-xs"
                       />
                     </div>

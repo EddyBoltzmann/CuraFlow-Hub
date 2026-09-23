@@ -696,7 +696,7 @@ export default function App() {
     // Instantly direct them to their respective pages by setting active session state and logging active sessions
     setSession(activeNewUser);
     setLoggedInUserIds(prev => Array.from(new Set([...prev, activeNewUser.id])));
-    triggerToast(`Welcome to CuraFlow, ${activeNewUser.name}! Your account has been initialized and logged in.`, 'success');
+    triggerToast(`Welcome to MyBP Coach, ${activeNewUser.name}! Your account has been initialized and logged in.`, 'success');
   };
 
   // Profile update
@@ -1288,8 +1288,8 @@ export default function App() {
                 className="space-y-2.5"
               >
                 <h1 className="text-3xl font-black tracking-tight text-white flex items-center justify-center gap-1.5 font-sans">
-                  <span>CuraFlow</span>
-                  <span className="text-emerald-400 font-light font-sans">Health</span>
+                  <span>MyBP</span>
+                  <span className="text-emerald-400 font-light font-sans">Coach</span>
                 </h1>
                 <p className="text-[10px] sm:text-[10.5px] font-mono tracking-widest text-slate-400 font-bold uppercase leading-none">
                   Production EHR & Clinical Care Suite
@@ -1388,9 +1388,9 @@ export default function App() {
         <header className="h-14 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-2.5 min-[375px]:px-4 sm:px-6 flex items-center justify-between shrink-0 font-sans select-none overflow-hidden">
           <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             <div className="px-1.5 py-0.5 sm:px-2 bg-emerald-600 rounded-lg flex items-center justify-center text-white text-[10px] sm:text-xs font-black shadow-lg">
-              CFL
+              MyBP
             </div>
-            <span className="font-display font-medium text-slate-900 dark:text-white font-sans hidden min-[350px]:inline text-xs sm:text-sm">CuraFlow</span>
+            <span className="font-display font-medium text-slate-900 dark:text-white font-sans hidden min-[350px]:inline text-xs sm:text-sm">MyBP Coach</span>
           </div>
 
           <div className="flex items-center gap-1.5 min-[375px]:gap-2.5 sm:gap-4 overflow-hidden">
@@ -1467,14 +1467,14 @@ export default function App() {
               </svg>
             </div>
             <div className="text-center min-[350px]:text-left">
-              <p className="text-[10px] sm:text-xs font-bold text-slate-900 dark:text-white leading-tight">Install CuraFlow App</p>
+              <p className="text-[10px] sm:text-xs font-bold text-slate-900 dark:text-white leading-tight">Install MyBP Coach App</p>
               <p className="text-[9px] text-slate-500 dark:text-slate-400">Enable offline biometric sync, secure chat backups, and swift clinical alerts.</p>
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               onClick={() => {
-                triggerToast('CuraFlow PWA Installation activated successfully!', 'success');
+                triggerToast('MyBP Coach PWA Installation activated successfully!', 'success');
                 setShowPwaPrompt(false);
               }}
               className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg transition-all shadow-sm shadow-emerald-600/10 cursor-pointer"

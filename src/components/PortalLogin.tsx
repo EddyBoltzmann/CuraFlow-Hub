@@ -60,7 +60,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
     {
       title: "Encrypted Health Records",
       tag: "HIPAA COMPLIANT",
-      description: "CuraFlow secures patient biometrics with 256-bit AES end-to-end payload isolation and active access logs.",
+      description: "MyBP Coach secures patient biometrics with 256-bit AES end-to-end payload isolation and active access logs.",
       stat: "256-Bit E2E",
       statLabel: "Enforced Security standards"
     },
@@ -338,10 +338,10 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
         <div className="relative flex items-center justify-between z-10">
           <div className="flex items-center gap-3">
             <div className="px-3.5 py-1.5 bg-emerald-600 rounded-xl flex items-center justify-center text-white font-black text-sm tracking-tighter shadow-xl shadow-emerald-600/30 border border-emerald-500">
-              CFL
+              MyBP
             </div>
             <div>
-              <span className="font-extrabold text-white text-base tracking-tight block leading-none">CuraFlow</span>
+              <span className="font-extrabold text-white text-base tracking-tight block leading-none">MyBP Coach</span>
               <span className="text-[9px] text-slate-400 font-bold tracking-widest uppercase">Clinical Engagement</span>
             </div>
           </div>
@@ -404,7 +404,7 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
         <div className="relative text-xs text-slate-400 flex items-center justify-between z-10 border-t border-slate-800/60 pt-6">
           <div className="flex items-center gap-1">
             <Award className="w-4 h-4 text-emerald-400" />
-            <span className="font-semibold text-[11px] text-slate-300">CuraFlow Clinical Network</span>
+            <span className="font-semibold text-[11px] text-slate-300">MyBP Coach Clinical Network</span>
           </div>
           <span className="text-[10px] font-mono text-slate-500">v3.5.0 • HTTPS TLS-1.3</span>
         </div>
@@ -417,10 +417,10 @@ export default function PortalLogin({ users, onLoginSuccess, onRegisterSuccess, 
           {/* Mobile Medical Branding View */}
           <div className="lg:hidden flex flex-col items-center text-center space-y-4">
             <div className="px-4 py-2 bg-emerald-600 rounded-2xl flex items-center justify-center text-white text-lg font-black shadow-xl">
-              CFL
+              MyBP
             </div>
             <div>
-              <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">CuraFlow Hub</h1>
+              <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">MyBP Coach Hub</h1>
               <p className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest mt-0.5">Clinical Diagnostics Portal</p>
             </div>
           </div>

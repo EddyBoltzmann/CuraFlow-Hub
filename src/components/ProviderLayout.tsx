@@ -192,9 +192,9 @@ export default function ProviderLayout({
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
                   <div className="flex items-center gap-2">
                     <div className="px-2 py-0.5 bg-emerald-600 rounded-lg flex items-center justify-center text-white text-xs font-black shadow-lg">
-                      CFL
+                      MyBP
                     </div>
-                    <span className="font-sans font-bold text-slate-900 dark:text-white">Provider Hub</span>
+                    <span className="font-sans font-bold text-slate-900 dark:text-white">MyBP Coach</span>
                   </div>
                   <button
                     onClick={() => setIsMobileMenuOpen(false)}
@@ -240,7 +240,7 @@ export default function ProviderLayout({
               </div>
 
               <div className="border-t border-slate-100 dark:border-slate-800 pt-4 mt-6 text-center">
-                <span className="text-[9px] text-slate-400 font-mono">CFL Core Secure Platform v2.4</span>
+                <span className="text-[9px] text-slate-400 font-mono">MyBP Coach Secure Platform v2.4</span>
               </div>
             </motion.div>
           </div>
